@@ -73,8 +73,8 @@
 | ssa-lower | .ssa | .mir | tools/ssa-lower/README.md |
 | regalloc | .mir | .mir | tools/regalloc/README.md |
 | phi-elim | .mir | .mir | tools/phi-elim/README.md |
-| emit-x86 | .mir + .rule | .s | tools/emit-x86/README.md |
-| emit-arm | .mir + .rule | .s | tools/emit-arm/README.md |
+| emit-x86 | .mir + .rule | .s | tools/emit/README.md |
+| emit-arm | .mir + .rule | .s | tools/emit/README.md |
 
 ## Cross-compilation
 
@@ -90,8 +90,8 @@
     ├── build.sh, mc, test.sh
     ├── README.md, docs/grammar.md
     ├── lib/janino.jar
-    ├── bin/               — 9 wrapper скриптове
-    ├── common/            — shared: Ir, Ssa, Opt, Regalloc, ...
-    ├── tools/             — 9 tools, всеки със свой Main + README
+    ├── bin/               — 9 wrapper скриптове (emit-arm/emit-x86 → shared emit)
+    ├── common/            — shared: Ir, Ssa, Opt, Regalloc, Emitter
+    ├── tools/             — main-ове на tools + shared emit main
     ├── rules/             — x86.rule, arm.rule
     └── examples/          — hello.mj, gcd.mj, fib.mj, forloop.mj
