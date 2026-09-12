@@ -46,7 +46,8 @@
 
 > **Статус (P2 — масиви + char[] String + System.out).** Масиви: layout 8-байтов header
 > (32-bit дължина, горните 32 бита 0 от bump arena) + data от +8. Frontend (AstLower):
-> `mapType("T[]")→ptr`, `varElem`/`elemOf` (int[]→i32, long[]→i64, double[]/float[]→f64),
+> `mapType("T[]")→ptr`, `elemOf` (int[]→i32, long[]→i64, double[]/float[]→f64,
+> `T[][]…`/`String[]`→ptr) + `javaTypeOf` + `elemOfAccess`,
 > `new T[n]`→`alloc_<el>`+`st_hdr`, `a.length` (AmbiguousName с n=2)→`load`+`len`,
 > `a[i]` read→`chk`+`lea_<el>`+`ld_<el>`, write→`chk`+`lea_<el>`+`st_<el>`. Нови ops
 > `alloc_i32/i64/f64`, `st_hdr`, `len`, `chk`, `lea_*`, `ld_*`, `st_*` минават безпроблемно
@@ -61,8 +62,20 @@
 > unrolled lea/st). `System.out.print/println` → детекция по target `System/out` +
 > overload по първи аргумент (ptr→`k_print/k_println`, scalar→`k_print_i32/k_println_i32`,
 > `println()`→`k_newline`). Примери `arrays.mj`/`oob.mj`/`str.mj`/`str2.mj`;
-> регресия **16/16 (arm64)**, x86 textual emit OK. Останало: multi-D, GC seam layout,
-> TLS-ready allocator, `String.equals`/concat.
+> регресия **16/16 (arm64)**, x86 textual emit OK.
+>
+> **Статус (P2 — multi-D масиви + stack spill).** Много-мерните — масив от масиви:
+> клетки на външния са 8-byte `ptr` (ops `alloc_ptr`/`lea_ptr`/`ld_ptr`/`st_ptr`).
+> `new T[m][n]` → `alloc_ptr` + нова helper `newArray2D` (цикъл: `alloc_<el>(n)` ред +
+> `st_ptr(lea_ptr(a,i))`); `new T[m][]` → `alloc_ptr` с празни клетки; `a[i]=new T[n]`
+> довършва редовете. Frontend `varElem`→`varJType`+`javaTypeOf`+`elemOfAccess`;
+> `a[i][j]` → двойно `chk`+level. `FieldAccessExpression.length` (`a[0].length`) се хваща
+> по `fieldName`. Пример `md.mj`. **Stack spill**: regalloc може да даде `stack -N` на
+> стойност; Emitter вече reload-ва spill-натите оператори в скретч `w/x/d11..13` (arm),
+> резервира `sub sp` по функция, x86 — `-N(%rbp)` (textual-only, единичен temp `%r11`).
+> Това поправя латентен бъг: преди spill-нати стойности тихо ползваха скретч `w9` и се
+> трошеха. Регресия **17/17 (arm64)**. Останало в P2: GC seam layout, TLS-ready allocator,
+> `String.equals`/concat.
 
 ## P3 — Обекти
 - Symbol/type table, класове/полета/методи/overloads.

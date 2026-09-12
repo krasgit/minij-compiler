@@ -10,8 +10,9 @@ public class AstLowerMain {
     Ir.Program prog; Ir.Func curFunc; Ir.Block cur;
     Map<String, Ir.Value> allocaOf = new LinkedHashMap<>();
     Map<String, String> varType = new LinkedHashMap<>();
-    Map<String, String> varElem = new LinkedHashMap<>();
+    Map<String, String> varJType = new LinkedHashMap<>();
     Map<String, String> methodRet = new LinkedHashMap<>();
+    Map<String, String> methodRetJt = new LinkedHashMap<>();
     Map<String, String> nativeMangle = new LinkedHashMap<>();
     Deque<Ir.Block> breaks = new ArrayDeque<>(), conts = new ArrayDeque<>();
     int dbgSeq = 1;
@@ -75,20 +76,48 @@ public class AstLowerMain {
             default: return "i32";
         }
     }
-    /** Елементен тип на 1-D примитивен масив от Java-типа "int[]"/"long[]"/"double[]". */
+    /** Елементен тип на 1-D примитивен масив от Java-типа "int[]"/"long[]"/"double[]".
+     *  Многомерен ("int[][]", "int[][][]", …) и "String[]" дават "ptr" (клетките пазят указатели). */
     static String elemOf(String jt) {
         if (jt == null || !jt.endsWith("[]")) return null;
         String c = jt.substring(0, jt.length() - 2);
-        if (c.endsWith("[]")) throw new RuntimeException("nested arrays not supported yet: " + jt);
+        if (c.endsWith("[]") || c.equals("String")) return "ptr";
         String t = mapType(c);
         if (t.equals("ptr")) throw new RuntimeException("unsupported array element type: " + jt);
         return t;
     }
-    /** Елементен тип за регистрация на променлива/параметър от тип масив или String. */
-    static String elemOfDecl(String jt) {
-        if ("String".equals(jt)) return "i32";       // String = char[] → cells i32
-        if ("String[]".equals(jt)) return "i32";     // array-of-String: lean → всяка клетка държи ptr (i32-ширина)
+    /** Тип на клетките при индексиран достъп (String се третира като char[]). */
+    static String elemOfAccess(String jt) {
+        if ("String".equals(jt)) return "i32";
         return elemOf(jt);
+    }
+    /** Java тип (string) на израз — за рекурсивно извеждане на масивен елемент. */
+    String javaTypeOf(Java.Rvalue e) {
+        if (e == null) return "int";
+        if (e instanceof Java.ParenthesizedExpression pe) return javaTypeOf((Java.Rvalue) pe.value);
+        if (e instanceof Java.AmbiguousName an) { String t = varJType.get(an.identifiers[0]); return t == null ? "int" : t; }
+        if (e instanceof Java.ArrayAccessExpression aa) {
+            String b = javaTypeOf(aa.lhs);
+            return b != null && b.endsWith("[]") ? b.substring(0, b.length() - 2) : "int";
+        }
+        if (e instanceof Java.Cast c) { String t = getStr(c, "targetType"); return t == null ? "int" : t; }
+        if (e instanceof Java.BooleanLiteral) return "boolean";
+        if (e instanceof Java.CharacterLiteral) return "char";
+        if (e instanceof Java.StringLiteral) return "String";
+        if (e instanceof Java.IntegerLiteral lit)
+            return (lit.value.endsWith("L") || lit.value.endsWith("l")) ? "long" : "int";
+        if (e instanceof Java.FloatingPointLiteral) return "double";
+        if (e instanceof Java.BinaryOperation b)
+            return wideJ(javaTypeOf((Java.Rvalue) b.lhs), javaTypeOf((Java.Rvalue) b.rhs));
+        if (e instanceof Java.UnaryOperation u) return u.operator.equals("!") ? "boolean" : javaTypeOf(u.operand);
+        if (e instanceof Java.MethodInvocation mi) { String r = methodRetJt.get(mi.methodName); return r == null ? "int" : r; }
+        if (e instanceof Java.FieldAccessExpression fa) { Object lh = get(fa, "lhs"); return lh instanceof Java.Rvalue lv ? javaTypeOf(lv) : "int"; }
+        return "int";
+    }
+    static String wideJ(String a, String b) {
+        if (a.equals("double") || b.equals("double")) return "double";
+        if (a.equals("long") || b.equals("long")) return "long";
+        return "int";
     }
     /** Janino държи StringLiteral/CharacterLiteral.value като суров текст с кавички
      *  и escapes; сваля кавичките и декодира escapes, за да получи реалните char-ове. */
@@ -125,11 +154,6 @@ public class AstLowerMain {
     }
 
     static String decodeString(String raw) { return decodeString(raw, '"'); }
-    /** Елементен тип на базата на индексен достъп (VariableDeclarator/param имена). */
-    String elemOfRval(Java.Rvalue e) {
-        if (e instanceof Java.AmbiguousName an) { String t = varElem.get(an.identifiers[0]); if (t != null) return t; }
-        return null;
-    }
     static boolean isInt(String t) { return t != null && (t.equals("i32") || t.equals("i64")); }
     static boolean isFp(String t)  { return t != null && t.equals("f64"); }
     static String wide(String a, String b) {
@@ -166,6 +190,10 @@ public class AstLowerMain {
             String s = m.varType.get(an.identifiers[0]);
             return s == null ? "i32" : s;
         }
+        if (e instanceof Java.ArrayAccessExpression aa) {
+            String el = elemOfAccess(m.javaTypeOf(aa.lhs));
+            return el == null ? "i32" : el;
+        }
         if (e instanceof Java.BinaryOperation b)
             return wide(inferType((Java.Rvalue) b.lhs, m), inferType((Java.Rvalue) b.rhs, m));
         if (e instanceof Java.Cast c) return mapType(getStr(c, "targetType"));
@@ -186,6 +214,7 @@ public class AstLowerMain {
         for (Object mo : methods) {
             if (!(mo instanceof Java.MethodDeclarator md)) continue;
             methodRet.put(md.name, mapType(getStr(md, "type")));
+            methodRetJt.put(md.name, getStr(md, "type"));
             if (md.isNative()) {
                 int ar = (md.formalParameters != null && md.formalParameters.parameters != null)
                         ? md.formalParameters.parameters.length : 0;
@@ -202,11 +231,11 @@ public class AstLowerMain {
     void method(Java.MethodDeclarator m) {
         Ir.Func f = new Ir.Func(); f.name = m.name;
         f.retType = mapType(getStr(m, "type"));
-        curFunc = f; allocaOf.clear(); varType.clear(); varElem.clear(); breaks.clear(); conts.clear();
+        curFunc = f; allocaOf.clear(); varType.clear(); varJType.clear(); breaks.clear(); conts.clear();
         for (Object p : m.formalParameters.parameters) {
             if (!(p instanceof Java.FunctionDeclarator.FormalParameter fp)) continue;
             String pt = mapType(getStr(fp, "type"));
-            if (pt.equals("ptr")) varElem.put(fp.name, elemOfDecl(getStr(fp, "type")));
+            varJType.put(fp.name, getStr(fp, "type"));
             f.params.add(new String[]{fp.name, pt});
         }
         Ir.Block e = new Ir.Block("entry"); cur = e; f.blocks.add(e);
@@ -229,7 +258,7 @@ public class AstLowerMain {
         if (s instanceof Java.LocalVariableDeclarationStatement d) {
             for (Java.VariableDeclarator vd : d.variableDeclarators) {
                 String dt = mapType(getStr(d, "type"));
-                if (dt.equals("ptr")) varElem.put(vd.name, elemOfDecl(getStr(d, "type")));
+                varJType.put(vd.name, getStr(d, "type"));
                 Ir.Value a = emit("alloca", dt); a.dbg = tag(s);
                 allocaOf.put(vd.name, a); varType.put(vd.name, dt);
                 prog.debug.declNames.put(a.dbg, vd.name);
@@ -373,7 +402,7 @@ public class AstLowerMain {
         if (a.lhs instanceof Java.ArrayAccessExpression aa) {
             Ir.Value b = expr(aa.lhs);
             Ir.Value i = conv(expr(aa.index), "i32");
-            String el = elemOfRval(aa.lhs);
+            String el = elemOfAccess(javaTypeOf(aa.lhs));
             if (el == null) throw new RuntimeException("array element type unknown at assign");
             Ir.Value ck = emit("chk", "void", b, i); ck.dbg = tag(a);
             Ir.Value ad = emit("lea_" + el, "ptr", b, i); ad.dbg = tag(a);
@@ -388,6 +417,37 @@ public class AstLowerMain {
         if (al == null) { System.err.println("# undefined: " + name); return; }
         Ir.Value v = conv(expr(a.rhs), varType.getOrDefault(name, al.type));
         Ir.Value st = emit("store","void",al,v); st.dbg = tag(a);
+    }
+
+    /** `new T[m][n]` → външен ptr-масив (редовете са масиви от елементи) + цикъл, който
+     *  алокира всеки ред (alloc_<el>) и го записва в клетката (st_ptr). */
+    Ir.Value newArray2D(Java.NewArray na, Java.Rvalue d0, Java.Rvalue d1, String baseJt) {
+        int t = tag(na);
+        String el = elemOfAccess(baseJt + "[]");
+        Ir.Value cn = conv(expr(d0), "i32");
+        Ir.Value a = emit("alloc_ptr", "ptr", cn); a.dbg = t;
+        Ir.Value h = emit("st_hdr", "void", a, cn); h.dbg = t;
+        Ir.Value en = conv(expr(d1), "i32");
+        int id = dbgSeq++;
+        Ir.Value cnt = emit("alloca", "i32"); cnt.dbg = id;
+        Ir.Value z0 = emit("store", "void", cnt, konst(0, "i32", -1)); z0.dbg = cnt.dbg;
+        Ir.Block mh = new Ir.Block("mtxh_"+id), mb = new Ir.Block("mtxb_"+id), mx = new Ir.Block("mtxx_"+id);
+        emit("jump", "void", blockRef(mh));
+        curFunc.blocks.add(mh); cur = mh;
+        Ir.Value cv = emit("load", "i32", cnt); cv.dbg = id;
+        Ir.Value lt = emit("cmplt", "i32", cv, cn); lt.dbg = id;
+        emit("branch", "void", lt, blockRef(mb), blockRef(mx));
+        curFunc.blocks.add(mb); cur = mb;
+        Ir.Value cvi = emit("load", "i32", cnt); cvi.dbg = id;
+        Ir.Value row = emit("alloc_" + el, "ptr", en); row.dbg = t;
+        Ir.Value rh = emit("st_hdr", "void", row, en); rh.dbg = t;
+        Ir.Value cell = emit("lea_ptr", "ptr", a, cvi); cell.dbg = t;
+        Ir.Value rs = emit("st_ptr", "void", cell, row); rs.dbg = t;
+        Ir.Value nx = emit("add", "i32", cvi, konst(1, "i32", -1)); nx.dbg = id;
+        Ir.Value sn = emit("store", "void", cnt, nx); sn.dbg = id;
+        emit("jump", "void", blockRef(mh));
+        curFunc.blocks.add(mx); cur = mx;
+        return a;
     }
 
     Ir.Value expr(Java.Rvalue e) {
@@ -443,23 +503,37 @@ if (e == null) return konst(0, "i32", -1);
             Java.Rvalue[] dims = de instanceof Java.Rvalue[] ? (Java.Rvalue[]) de : null;
             int nd = dims == null ? 0 : dims.length;
             int trailing = get(na, "dims") instanceof Integer i ? i : 0;
-            if (nd != 1 || trailing > 0) throw new RuntimeException("only 1-D arrays supported (" + nd + " dims)");
-            String el = mapType(getStr(na, "type"));
-            if (el.equals("ptr")) throw new RuntimeException("only primitive 1-D arrays supported");
-            Ir.Value c = conv(expr(dims[0]), "i32");
-            Ir.Value a = emit("alloc_" + el, "ptr", c); a.dbg = tag(e);
-            Ir.Value h = emit("st_hdr", "void", a, c); h.dbg = tag(e);
-            return a;
+            String base = getStr(na, "type");
+            int total = nd + trailing;
+            if (nd == 1) {
+                String el = elemOfAccess(base + "[]".repeat(total));
+                Ir.Value c = conv(expr(dims[0]), "i32");
+                Ir.Value a = emit("alloc_" + el, "ptr", c); a.dbg = tag(e);
+                Ir.Value h = emit("st_hdr", "void", a, c); h.dbg = tag(e);
+                return a;
+            }
+            if (nd == 2 && trailing == 0) return newArray2D(na, dims[0], dims[1], base);
+            throw new RuntimeException("new with " + total + " dims not supported yet (1-D, 2-D или T[n][] са покрити)");
         }
         if (e instanceof Java.ArrayAccessExpression aa) {
             Ir.Value b = expr(aa.lhs);
             Ir.Value i = conv(expr(aa.index), "i32");
-            String el = elemOfRval(aa.lhs);
+            String el = elemOfAccess(javaTypeOf(aa.lhs));
             if (el == null) throw new RuntimeException("array element type unknown at access");
             Ir.Value ck = emit("chk", "void", b, i); ck.dbg = tag(e);
             Ir.Value ad = emit("lea_" + el, "ptr", b, i); ad.dbg = tag(e);
             Ir.Value l = emit("ld_" + el, el, ad); l.dbg = tag(e);
             return l;
+        }
+        if (e instanceof Java.FieldAccessExpression fa) {
+            String nm = getStr(fa, "fieldName");
+            if (nm != null && nm.equals("length")) {
+                Object lh = get(fa, "lhs");
+                Ir.Value b = expr((Java.Rvalue) lh);
+                Ir.Value l = emit("len", "i32", b); l.dbg = tag(e);
+                return l;
+            }
+            throw new RuntimeException("field access on non-array (fields unsupported): " + nm);
         }
         if (e instanceof Java.BinaryOperation b) {
             Ir.Value l = expr(b.lhs), r = expr(b.rhs);

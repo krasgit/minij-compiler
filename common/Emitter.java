@@ -52,8 +52,10 @@ public class Emitter {
 
     String reg(Ir.Value v) {
         String l = loc.get(v);
-        if (l != null && l.startsWith("freg ")) return l.substring(5);   // FP pool
+        if (l != null && l.startsWith("freg ")) return l.substring(5);
         if (l != null && l.startsWith("reg ")) return R.width(l.substring(4), v.type);
+        String t = spillTemp.get(v);
+        if (t != null) return t;
         return R.width(R.fallback != null ? R.fallback : (arch.equals("arm64") ? "w9" : "%eax"), v.type);
     }
 
@@ -67,15 +69,39 @@ public class Emitter {
     void func(Ir.Func f) {
         fn = f;
         out.append("    .globl ").append(f.name).append("\n").append(f.name).append(":\n");
+        spillBytes = align16(maxSpillBytes(f));
+        StringBuilder save = out;
+        StringBuilder prow = new StringBuilder();
+        out = prow;
         expand(R.prologue);
+        out = save;
+        if (spillBytes > 0 && arch.equals("arm64")) prow.append("    sub sp, sp, #").append(spillBytes).append("\n");
+        out.append(prow);
         for (Ir.Block b : f.blocks) {
             out.append(lbl(f, b)).append(":\n");
             for (Ir.Value v : b.ins) ins(v);
         }
         out.append(exit()).append(":\n");
+        if (spillBytes > 0 && arch.equals("arm64")) out.append("    add sp, sp, #").append(spillBytes).append("\n");
         expand(R.epilogue);
         out.append("\n");
     }
+
+    // largest spill magnitude (bytes) needed by any value of this function
+    int maxSpillBytes(Ir.Func f) {
+        int m = 0;
+        for (Ir.Block b : f.blocks)
+            for (Ir.Value v : b.ins) {
+                String l = loc.get(v);
+                if (l != null && l.startsWith("stack ")) {
+                    int off = Integer.parseInt(l.substring(6).trim());
+                    m = Math.max(m, -off);
+                }
+            }
+        return m;
+    }
+
+    int align16(int n) { return (n + 15) & ~15; }
 
     Ir.Block find(Ir.Func f, Ir.Value t) {
         if (!t.op.equals("block")) return f.blocks.get(0);
@@ -104,7 +130,9 @@ public class Emitter {
         cx.v = v;
         if (!sel.any) for (int i = 0; i < sel.pat.size(); i++) cx.bind.put(sel.pat.get(i), v.args.get(i));
         loopIdx = -1;
+        prepareSpills(v);
         expand(sel.body, cx);
+        saveSpills(v);
     }
 
     static String canon(String o) {
@@ -122,6 +150,68 @@ public class Emitter {
                 if (o.equals("branch") || o.equals("jump") || o.equals("return")) return o;
                 return o;
         }
+    }
+
+    // ─── stack spill support ───────────────────────────────────────────────
+    // Regalloc may assign a value location "stack -N". Spilled operands are
+    // reloaded into dedicated scratch registers that no rule template uses
+    // (arm64: w/x/d 11/12/13; x86: r11 — single temp, textual backend only).
+    Map<Ir.Value, String> spillTemp = new HashMap<>();
+    int spillBytes;
+
+    boolean spilled(Ir.Value v) {
+        String l = loc.get(v);
+        return l != null && l.startsWith("stack ");
+    }
+
+    int spillSlot(Ir.Value v) {
+        return Integer.parseInt(loc.get(v).substring(6).trim());
+    }
+
+    String stemp(Ir.Value v, int idx) {
+        if (arch.equals("arm64")) {
+            String base = idx == 0 ? "11" : (idx == 1 ? "12" : "13");
+            if (R.isFpType(v.type)) return "d" + base;
+            if (v.type == null || v.type.equals("i32")) return "w" + base;
+            return "x" + base;
+        }
+        if (R.isFpType(v.type)) return "%r11";
+        return (v.type == null || v.type.equals("i32")) ? "%r11d" : "%r11";
+    }
+
+    String slotMem(Ir.Value v) {
+        if (arch.equals("arm64")) return "[sp, #" + (spillBytes + spillSlot(v)) + "]";
+        return "-" + (240 + (-spillSlot(v))) + "(%rbp)";
+    }
+
+    void spillLoad(Ir.Value v) {
+        String t = spillTemp.get(v);
+        String mem = slotMem(v);
+        if (arch.equals("arm64")) out.append("    ldr ").append(t).append(", ").append(mem).append("\n");
+        else out.append(t.equals("%r11") ? "    movq " : "    movl ").append(mem).append(", ").append(t).append("\n");
+    }
+
+    void spillStore(Ir.Value v) {
+        String t = spillTemp.get(v);
+        String mem = slotMem(v);
+        if (arch.equals("arm64")) out.append("    str ").append(t).append(", ").append(mem).append("\n");
+        else out.append(t.equals("%r11") ? "    movq " : "    movl ").append(mem).append(", ").append(t).append("\n");
+    }
+
+    void prepareSpills(Ir.Value v) {
+        spillTemp.clear();
+        int ti = 0;
+        for (Ir.Value a : v.args) {
+            if (spilled(a)) {
+                spillTemp.put(a, stemp(a, ti++));
+                spillLoad(a);
+            }
+        }
+        if (v.type != null && !v.type.equals("void") && spilled(v)) spillTemp.put(v, stemp(v, ti));
+    }
+
+    void saveSpills(Ir.Value v) {
+        if (v.type != null && !v.type.equals("void") && spilled(v)) spillStore(v);
     }
 
     // ─── template interpreter ───────────────────────────────────────────────
@@ -218,7 +308,7 @@ public class Emitter {
                     Ir.Value av = cx.v.args.get(loopIdx);
                     String vt = av.type;
                     boolean fp = vt != null && (vt.equals("f32") || vt.equals("f64") || vt.equals("float") || vt.equals("double"));
-                    boolean i64 = vt != null && vt.equals("i64");
+                    boolean i64 = vt != null && (vt.equals("i64") || vt.equals("ptr") || vt.equals("address"));
                     if (arch.equals("arm64")) return fp ? "fmov" : "mov";
                     else return fp ? "movsd" : (i64 ? "movq" : "movl");
                 }
@@ -284,7 +374,7 @@ public class Emitter {
             b.append("    ");
             if (arm) b.append(fp ? "fmov " : "mov ").append(home).append(", ").append(arg);
             else {
-                boolean i64 = ptype.equals("i64");
+                boolean i64 = ptype.equals("i64") || ptype.equals("ptr") || ptype.equals("address");
                 b.append(fp ? "movsd " : (i64 ? "movq " : "movl ")).append(arg).append(", ").append(home);
             }
         }

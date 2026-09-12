@@ -300,6 +300,15 @@ emit alloc_f64(c) {
     bl mm_alloc
     mov ${dst}, x0
 }
+emit alloc_ptr(c) {
+    sxtw x9, ${c}
+    add x9, x9, #1
+    lsl x9, x9, #3
+    mov x0, x9
+    mov x1, #0
+    bl mm_alloc
+    mov ${dst}, x0
+}
 emit st_hdr(a, c) {
     str ${c}, [${a}]
 }
@@ -327,6 +336,11 @@ emit lea_f64(a, i) {
     add x9, ${a}, x9, lsl #3
     add $dst, x9, #8
 }
+emit lea_ptr(a, i) {
+    sxtw x9, ${i}
+    add x9, ${a}, x9, lsl #3
+    add $dst, x9, #8
+}
 emit ld_i32(a) {
     ldr $dst, [${a}]
 }
@@ -336,6 +350,9 @@ emit ld_i64(a) {
 emit ld_f64(a) {
     ldr $dst, [${a}]
 }
+emit ld_ptr(a) {
+    ldr $dst, [${a}]
+}
 emit st_i32(a, v) {
     str ${v}, [${a}]
 }
@@ -343,5 +360,8 @@ emit st_i64(a, v) {
     str ${v}, [${a}]
 }
 emit st_f64(a, v) {
+    str ${v}, [${a}]
+}
+emit st_ptr(a, v) {
     str ${v}, [${a}]
 }

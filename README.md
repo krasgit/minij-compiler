@@ -93,10 +93,10 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **16/16 теста на arm64**
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **17/17 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
-str2 с `\t`/`\n` escapes и char[] return/params; всеки — exit code + stdout чек).
+str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -105,6 +105,16 @@ str2 с `\t`/`\n` escapes и char[] return/params; всеки — exit code + st
 `k_println_i32`/`k_print_i32` (скалари) и `k_newline` (`println()` с 0 аргумента).
 Работят `System.out.println(s)`, `s.length`, `s[i]`, литерали с escapes (`\n \t \0 \" \\ \uXXXX`),
 char[] като параметри/return, `call`-overload разпознаване по типа на първия аргумент.
+
+### Много-мерни масиви (P2)
+
+Multi-D = масив от масиви: клетките на външния масив са `ptr` (8-byte) към редове.
+`new int[m][n]` слиза до `alloc_ptr` + цикъл с `alloc_i32(n)` редове/`lea_ptr`/`st_ptr`;
+`new int[m][]` дава `alloc_ptr` с нулеви клетки (редовете се пълнят с `a[i] = new int[n]`).
+Има `a.length`, `a[i].length`, `a[i][j]` read/write с bounds-check на всяко ниво, `int[] r = a[1]`.
+Regalloc вече поддържа **stack spill** (стойности с `stack -N` location се reload-ват в
+скретч `w/x/d11..13` на arm; слага се `sub sp` пропорционално на функцията), което е и истинска
+поправка на латентен бъг — преди spill-нати стойности тихо падаха в скретч `w9` и се трошеха.
 
 ## Пътна карта
 

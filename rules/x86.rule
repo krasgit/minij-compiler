@@ -357,6 +357,13 @@ emit alloc_f64(c) {
     callq mm_alloc
     movq %rax, $dst
 }
+emit alloc_ptr(c) {
+    movslq ${c}, %r10
+    leaq 8(,%r10,8), %rdi
+    xorl %esi, %esi
+    callq mm_alloc
+    movq %rax, $dst
+}
 emit st_hdr(a, c) {
     movl ${c}, (${a})
 }
@@ -387,6 +394,12 @@ emit lea_f64(a, i) {
     addq ${a}, %r10
     leaq 8(%r10), $dst
 }
+emit lea_ptr(a, i) {
+    movslq ${i}, %r10
+    shlq $3, %r10
+    addq ${a}, %r10
+    leaq 8(%r10), $dst
+}
 emit ld_i32(a) {
     movl (${a}), $dst
 }
@@ -396,6 +409,9 @@ emit ld_i64(a) {
 emit ld_f64(a) {
     movsd (${a}), $dst
 }
+emit ld_ptr(a) {
+    movq (${a}), $dst
+}
 emit st_i32(a, v) {
     movl ${v}, (${a})
 }
@@ -404,4 +420,7 @@ emit st_i64(a, v) {
 }
 emit st_f64(a, v) {
     movsd ${v}, (${a})
+}
+emit st_ptr(a, v) {
+    movq ${v}, (${a})
 }
