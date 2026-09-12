@@ -1,0 +1,64 @@
+regs: %rbx %r12 %r13 %r14 %r15 ;
+scratch: %r8 %r9 %r10 %r11 ;
+
+prologue {
+    pushq %rbp
+    movq %rsp, %rbp
+    pushq %rbx
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+    subq $128, %rsp
+}
+
+epilogue {
+    addq $128, %rsp
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %rbx
+    popq %rbp
+    retq
+}
+
+emit CONST_i32(v) { movl $${v}, $dst }
+emit ADD_i32(x, y) { movl ${x}, $dst
+                     addl ${y}, $dst }
+emit SUB_i32(x, y) { movl ${x}, $dst
+                     subl ${y}, $dst }
+emit MUL_i32(x, y) { movl ${x}, $dst
+                     imull ${y}, $dst }
+emit DIV_i32(x, y) { movl ${x}, %eax
+                     cltd
+                     idivl ${y}
+                     movl %eax, $dst }
+emit MOD_i32(x, y) { movl ${x}, %eax
+                     cltd
+                     idivl ${y}
+                     movl %edx, $dst }
+emit CMPLT_i32(x, y) { movl ${x}, %eax
+                       cmpl ${y}, %eax
+                       setl %al
+                       movzbl %al, $dst }
+emit CMPGT_i32(x, y) { movl ${x}, %eax
+                       cmpl ${y}, %eax
+                       setg %al
+                       movzbl %al, $dst }
+emit CMPLE_i32(x, y) { movl ${x}, %eax
+                       cmpl ${y}, %eax
+                       setle %al
+                       movzbl %al, $dst }
+emit CMPGE_i32(x, y) { movl ${x}, %eax
+                       cmpl ${y}, %eax
+                       setge %al
+                       movzbl %al, $dst }
+emit CMPEQ_i32(x, y) { movl ${x}, %eax
+                       cmpl ${y}, %eax
+                       sete %al
+                       movzbl %al, $dst }
+emit CMPNE_i32(x, y) { movl ${x}, %eax
+                       cmpl ${y}, %eax
+                       setne %al
+                       movzbl %al, $dst }

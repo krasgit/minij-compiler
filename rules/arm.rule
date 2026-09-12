@@ -1,0 +1,38 @@
+regs: x19 x20 x21 x22 x23 x24 x25 x26 ;
+scratch: x8 x9 x10 x11 ;
+
+prologue {
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+}
+
+epilogue {
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+}
+
+emit CONST_i32(v) { mov $dst, #${v} }
+emit ADD_i32(x, y) { add $dst, ${x}, ${y} }
+emit SUB_i32(x, y) { sub $dst, ${x}, ${y} }
+emit MUL_i32(x, y) { mul $dst, ${x}, ${y} }
+emit DIV_i32(x, y) { sdiv $dst, ${x}, ${y} }
+emit MOD_i32(x, y) { sdiv w9, ${x}, ${y}
+                     msub $dst, w9, ${y}, ${x} }
+emit CMPLT_i32(x, y) { cmp ${x}, ${y}
+                       cset $dst, lt }
+emit CMPGT_i32(x, y) { cmp ${x}, ${y}
+                       cset $dst, gt }
+emit CMPLE_i32(x, y) { cmp ${x}, ${y}
+                       cset $dst, le }
+emit CMPGE_i32(x, y) { cmp ${x}, ${y}
+                       cset $dst, ge }
+emit CMPEQ_i32(x, y) { cmp ${x}, ${y}
+                       cset $dst, eq }
+emit CMPNE_i32(x, y) { cmp ${x}, ${y}
+                       cset $dst, ne }

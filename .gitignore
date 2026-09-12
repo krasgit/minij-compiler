@@ -1,0 +1,5 @@
+out/
+lib/*.jar
+t_*
+*.o
+*.class

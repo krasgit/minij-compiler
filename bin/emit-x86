@@ -1,0 +1,4 @@
+#!/data/data/com.termux/files/usr/bin/bash
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+CP="$DIR/out:$DIR/lib/janino.jar:$DIR/lib/commons-compiler.jar"
+exec java -cp "$CP" EmitX86Main "$@"

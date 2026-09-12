@@ -1,0 +1,7 @@
+class Hello {
+    static int add(int a, int b) { return a + b; }
+    static int sub(int a, int b) { return a - b; }
+    static int main() {
+        return add(42, 10) - sub(20, 15);
+    }
+}
