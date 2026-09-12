@@ -11,6 +11,14 @@
 - Backend-ите са `.rule` файлове (данни).
 - Janino е reference parser.
 
+## Контракт между tools
+
+- Всеки tool е **самостоятелна програма** — 1 входен файл → 1 изходен файл (`argv[1]` и `argv[2]`); не знае нищо за останалите.
+- Изходът на всеки tool се **подава като вход на следващия** — тестовете пускат всеки tool сам и проверяват изхода му.
+- При грешка tool-ът изписва съобщение на stderr и излиза с **различен от 0** exit code; успехът е exit 0.
+- Backend-ът (**emit-arm / emit-x86 / regalloc**) освен IR чете `.rule` файл (3-ти аргумент) — шаблон за инструкциите + регистров пул; самите инструменти съдържат само рамка (labels, канонични имена на ops).
+- Хостът може да е с друга архитектура от таргета: emit/асемблирането/линкването са разделени, така че `.s` може да се генерира независимо.
+
 ## Инсталация
 
     pkg install openjdk-17 binutils wget
@@ -65,8 +73,8 @@
 | ssa-lower | .ssa | .mir | tools/ssa-lower/README.md |
 | regalloc | .mir | .mir | tools/regalloc/README.md |
 | phi-elim | .mir | .mir | tools/phi-elim/README.md |
-| emit-x86 | .mir | .s | tools/emit-x86/README.md |
-| emit-arm | .mir | .s | tools/emit-arm/README.md |
+| emit-x86 | .mir + .rule | .s | tools/emit-x86/README.md |
+| emit-arm | .mir + .rule | .s | tools/emit-arm/README.md |
 
 ## Cross-compilation
 

@@ -1,15 +1,11 @@
 import java.util.*;
 public class Regalloc {
-    static final String[] X = {"%rbx","%r12","%r13","%r14","%r15"};
-    static final String[] A = {"w19","w20","w21","w22","w23","w24","w25","w26","w27","w28"};
-    public static void run(Ir.Program p, boolean arm) {
-        String[] regs = arm ? A : X;
-        String[] argReg = arm
-            ? new String[]{"w19","w20","w21","w22","w23","w24","w25","w26","w27","w28"}
-            : new String[]{"%ebx","%r12d","%r13d","%r14d","%r15d"};
-        for (Ir.Func f : p.funcs) alloc(f, regs, argReg, p.debug);
+    public static void run(Ir.Program p, List<String> regs) {
+        if (regs == null || regs.isEmpty()) throw new IllegalArgumentException("register pool is empty (from .rule file)");
+        String[] regArr = regs.toArray(new String[0]);
+        for (Ir.Func f : p.funcs) alloc(f, regArr, p.debug);
     }
-    static void alloc(Ir.Func f, String[] regs, String[] argReg, Ir.DebugInfo dbg) {
+    static void alloc(Ir.Func f, String[] regs, Ir.DebugInfo dbg) {
         List<Ir.Value> order = new ArrayList<>();
         for (Ir.Block b : f.blocks) for (Ir.Value v : b.ins) {
             if (Ir.isTerm(v.op) || v.op.equals("block") || v.op.equals("symbol")) continue;
@@ -20,8 +16,8 @@ public class Regalloc {
             for (Ir.Value a : v.args) {
                 if (a == null || (!a.op.equals("param") && !a.op.startsWith("PARAM_"))) continue;
                 int i = (int) a.imm;
-                if (i >= 0 && i < argReg.length && !dbg.locations.containsKey(a))
-                    dbg.locations.put(a, "reg " + argReg[i]);
+                if (i >= 0 && i < regs.length && !dbg.locations.containsKey(a))
+                    dbg.locations.put(a, "reg " + regs[i]);
             }
         Map<Ir.Value,Integer> last = new HashMap<>();
         for (int i = 0; i < order.size(); i++) {
@@ -31,7 +27,7 @@ public class Regalloc {
         }
         Map<Ir.Value,String> loc = new LinkedHashMap<>();
         LinkedHashSet<String> taken = new LinkedHashSet<>();
-        for (int i = 0; i < Math.min(f.params.size(), argReg.length); i++) taken.add(argReg[i]);
+        for (int i = 0; i < Math.min(f.params.size(), regs.length); i++) taken.add(regs[i]);
         List<Ir.Value> phis = new ArrayList<>();
         for (Ir.Block b : f.blocks) for (Ir.Value v : b.ins)
             if (v.op.startsWith("PHI_") || v.op.equals("phi")) phis.add(v);

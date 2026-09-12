@@ -1,6 +1,6 @@
 # emit-arm
 
-Machine IR → ARM64 asm чрез rules/arm.rule.
+Machine IR → ARM64 asm чрез rules/arm.rule (шаблонен интерпретатор, без твърдо кодирани инструкции).
 
 ## Употреба
 

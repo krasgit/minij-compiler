@@ -12,6 +12,7 @@ public class Ir {
         public String name; public List<Value> ins = new ArrayList<>();
         public Block(String n) { name = n; }
         public Value term() { return ins.isEmpty() ? null : ins.get(ins.size()-1); }
+        @Override public int hashCode() { return name == null ? 0 : name.hashCode(); }
     }
     public static class Func {
         public String name, retType = "i32";

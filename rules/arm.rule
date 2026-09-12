@@ -1,5 +1,7 @@
-regs: x19 x20 x21 x22 x23 x24 x25 x26 ;
-scratch: x8 x9 x10 x11 ;
+regs: w19 w20 w21 w22 w23 w24 w25 w26 w27 w28
+args: w0 w1 w2 w3 w4 w5 w6 w7
+ret: w0
+fallback: w9
 
 prologue {
     stp x29, x30, [sp, #-16]!
@@ -7,9 +9,14 @@ prologue {
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!
+    ${params}
 }
 
 epilogue {
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
@@ -17,22 +24,84 @@ epilogue {
     ret
 }
 
-emit CONST_i32(v) { mov $dst, #${v} }
-emit ADD_i32(x, y) { add $dst, ${x}, ${y} }
-emit SUB_i32(x, y) { sub $dst, ${x}, ${y} }
-emit MUL_i32(x, y) { mul $dst, ${x}, ${y} }
-emit DIV_i32(x, y) { sdiv $dst, ${x}, ${y} }
-emit MOD_i32(x, y) { sdiv w9, ${x}, ${y}
-                     msub $dst, w9, ${y}, ${x} }
-emit CMPLT_i32(x, y) { cmp ${x}, ${y}
-                       cset $dst, lt }
-emit CMPGT_i32(x, y) { cmp ${x}, ${y}
-                       cset $dst, gt }
-emit CMPLE_i32(x, y) { cmp ${x}, ${y}
-                       cset $dst, le }
-emit CMPGE_i32(x, y) { cmp ${x}, ${y}
-                       cset $dst, ge }
-emit CMPEQ_i32(x, y) { cmp ${x}, ${y}
-                       cset $dst, eq }
-emit CMPNE_i32(x, y) { cmp ${x}, ${y}
-                       cset $dst, ne }
+emit CONST_i32() {
+    mov $dst, #${imm}
+}
+
+emit ADD_i32(x, y) {
+    add $dst, ${x}, ${y}
+}
+emit SUB_i32(x, y) {
+    sub $dst, ${x}, ${y}
+}
+emit MUL_i32(x, y) {
+    mul $dst, ${x}, ${y}
+}
+emit DIV_i32(x, y) {
+    sdiv $dst, ${x}, ${y}
+}
+emit MOD_i32(x, y) {
+    sdiv w9, ${x}, ${y}
+    msub $dst, w9, ${y}, ${x}
+}
+
+emit CMPLT_i32(x, y) {
+    cmp ${x}, ${y}
+    cset $dst, lt
+}
+emit CMPGT_i32(x, y) {
+    cmp ${x}, ${y}
+    cset $dst, gt
+}
+emit CMPLE_i32(x, y) {
+    cmp ${x}, ${y}
+    cset $dst, le
+}
+emit CMPGE_i32(x, y) {
+    cmp ${x}, ${y}
+    cset $dst, ge
+}
+emit CMPEQ_i32(x, y) {
+    cmp ${x}, ${y}
+    cset $dst, eq
+}
+emit CMPNE_i32(x, y) {
+    cmp ${x}, ${y}
+    cset $dst, ne
+}
+
+emit MOV_i32(x) {
+    if ${x} != $dst {
+        mov $dst, ${x}
+    }
+}
+emit MOV_i32(x, d) {
+    if ${x} != ${d} {
+        mov ${d}, ${x}
+    }
+}
+
+emit branch(c, t, e) {
+    cmp ${c}, #0
+    b.ne ${t}
+    b ${e}
+}
+emit jump(t) {
+    b ${t}
+}
+
+emit return() {
+    b ${exit}
+}
+emit return(v) {
+    mov ${ret}, ${v}
+    b ${exit}
+}
+
+emit call(...) {
+    for each ${args} i {
+        mov ${argregs}[i], ${args}[i]
+    }
+    bl ${name}
+    mov $dst, ${ret}
+}
