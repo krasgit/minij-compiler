@@ -44,6 +44,22 @@
 - TLS-ready `mm_alloc` дизайн (per-thread allocator pointer — за P7 threads).
 - `java.lang` mini-core (System.out basics, lean String).
 
+> **Статус (P2 — първи примитивни 1-D масиви изпълнено):** layout 8-байтов header
+> (32-bit дължина, горните 32 бита 0 от bump arena) + data от +8. Frontend (AstLower):
+> `mapType("T[]")→ptr`, `varElem`/`elemOf` (int[]→i32, long[]→i64, double[]/float[]→f64),
+> `new T[n]`→`alloc_<el>`+`st_hdr`, `a.length` (AmbiguousName с n=2)→`load`+`len`,
+> `a[i]` read→`chk`+`lea_<el>`+`ld_<el>`, write→`chk`+`lea_<el>`+`st_<el>`. Нови ops
+> `alloc_i32/i64/f64`, `st_hdr`, `len`, `chk`, `lea_*`, `ld_*`, `st_*` minват безпроблемно
+> през SSA/canon/ssa-lower (ptr→i64-width). Bounds-check `chk` (arm `sxtw; ldr; cmp; b.ls
+> k_bounds_error` / x86 `movslq; movl; cmpq; jae`) → `sys_exit(134)`. Реralloc фикс:
+> void ops (chk/st_*) участват в last-use на аргументите си; PHI аргумент се брои за ползван
+> в края на predecessor-а; стойности дефинирани извън цикъл, но четени в него, се удължават
+> до края на цикъла (иначе linear scan преизползва жив регистър). `MOVSXT_i64` sign-extend
+> при int→long retype (вместо aliasing MOV_i64); ARM i32 consts през `movz/movk`
+> (`${imov}`) вместо единичен `mov` (покрива `1000000007`). Примери `arrays.mj`/`oob.mj`;
+> регресия **14/14 (arm64)**. Останало: `char[]` String, `System.out.*`, multi-D, GC seam
+> layout под 64-дума headers, TLS-ready allocator.
+
 ## P3 — Обекти
 - Symbol/type table, класове/полета/методи/overloads.
 - Object layout: **header дума** (class index + **monitor/bias bits** за P7 + GC bits space).

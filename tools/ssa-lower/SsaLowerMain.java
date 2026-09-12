@@ -20,7 +20,7 @@ public class SsaLowerMain {
     static void lower(Ir.Program p) {
         for (Ir.Func f : p.funcs) for (Ir.Block b : f.blocks) for (Ir.Value v : b.ins) {
             String o = v.op, t = tyOf(v, f);
-            String s = t.equals("i64") ? "i64" : (t.equals("f64") ? "f64" : "i32");
+            String s = (t.equals("i64")||t.equals("ptr")||t.equals("address")) ? "i64" : (t.equals("f64") ? "f64" : "i32");
             if (o.equals("add")) v.op = "ADD_" + s;
             else if (o.equals("sub")) v.op = "SUB_" + s;
             else if (o.equals("mul")) v.op = "MUL_" + s;

@@ -37,7 +37,8 @@ public class Ir {
             || op.startsWith("RETURN_");
     }
     public static String suffix(String type) {
-        return type != null && type.equals("i64") ? "i64" : (type != null && type.equals("f64") ? "f64" : "i32");
+        if (type != null && (type.equals("i64") || type.equals("ptr") || type.equals("address"))) return "i64";
+        return type != null && type.equals("f64") ? "f64" : "i32";
     }
     public static class Writer {
         Map<Value,Integer> vid = new HashMap<>(); int next = 0;

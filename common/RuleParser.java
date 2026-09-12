@@ -266,7 +266,7 @@ public class RuleParser {
         // placeholder-name sanity per rule
     }
     static void checkPh(Rule ru) {
-        Set<String> allowed = new LinkedHashSet<>(Arrays.asList("dst", "imm", "name", "ret", "exit", "args", "argregs", "params", "scratch", "ws"));
+        Set<String> allowed = new LinkedHashSet<>(Arrays.asList("dst", "imm", "imov", "name", "ret", "exit", "args", "argregs", "params", "scratch", "ws"));
         allowed.addAll(ru.pat);
         for (Stmt s : ru.body) checkStmt(s, allowed);
     }

@@ -272,6 +272,9 @@ emit MOV_i64(x) {
         movq ${x}, $dst
     }
 }
+emit MOVSXT_i64(x) {
+    movslq ${x}, $dst
+}
 emit MOV_i64(x, d) {
     if ${x} != ${d} {
         movq ${x}, ${d}
@@ -330,4 +333,75 @@ emit CALL_f64(...) {
     }
     callq ${name}
     movsd ${ret}, $dst
+}
+
+# ── P2: heap arrays over mm_alloc (header=[len:u32][pad], data at +8) ──────
+emit alloc_i32(c) {
+    movslq ${c}, %r10
+    leaq 8(,%r10,4), %rdi
+    xorl %esi, %esi
+    callq mm_alloc
+    movq %rax, $dst
+}
+emit alloc_i64(c) {
+    movslq ${c}, %r10
+    leaq 8(,%r10,8), %rdi
+    xorl %esi, %esi
+    callq mm_alloc
+    movq %rax, $dst
+}
+emit alloc_f64(c) {
+    movslq ${c}, %r10
+    leaq 8(,%r10,8), %rdi
+    xorl %esi, %esi
+    callq mm_alloc
+    movq %rax, $dst
+}
+emit st_hdr(a, c) {
+    movl ${c}, (${a})
+}
+emit len(a) {
+    movl (${a}), $dst
+}
+emit chk(a, i) {
+    movslq ${i}, %r10
+    movl (${a}), %r11d
+    cmpq %r11, %r10
+    jae k_bounds_error
+}
+emit lea_i32(a, i) {
+    movslq ${i}, %r10
+    shlq $2, %r10
+    addq ${a}, %r10
+    leaq 8(%r10), $dst
+}
+emit lea_i64(a, i) {
+    movslq ${i}, %r10
+    shlq $3, %r10
+    addq ${a}, %r10
+    leaq 8(%r10), $dst
+}
+emit lea_f64(a, i) {
+    movslq ${i}, %r10
+    shlq $3, %r10
+    addq ${a}, %r10
+    leaq 8(%r10), $dst
+}
+emit ld_i32(a) {
+    movl (${a}), $dst
+}
+emit ld_i64(a) {
+    movq (${a}), $dst
+}
+emit ld_f64(a) {
+    movsd (${a}), $dst
+}
+emit st_i32(a, v) {
+    movl ${v}, (${a})
+}
+emit st_i64(a, v) {
+    movq ${v}, (${a})
+}
+emit st_f64(a, v) {
+    movsd ${v}, (${a})
 }

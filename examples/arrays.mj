@@ -1,0 +1,33 @@
+class Array {
+    static int main() {
+        int n = 5;
+        int[] a = new int[n];
+        int i = 0;
+        while (i < n) {
+            a[i] = i * 3;
+            i = i + 1;
+        }
+        int s = 0;
+        i = 0;
+        while (i < n) {
+            s = s + a[i];
+            i = i + 1;
+        }
+        puti(s);
+        puti(a.length);
+        puti(a[2]);
+
+        long[] l = new long[3];
+        l[0] = 1000000007;
+        l[1] = 2;
+        l[2] = l[0] + l[1];
+        puti((int) l[2]);
+
+        double[] d = new double[3];
+        d[0] = 1.5;
+        d[1] = 2.5;
+        d[2] = d[0] + d[1];
+        puti((int) d[2]);
+        return 0;
+    }
+}

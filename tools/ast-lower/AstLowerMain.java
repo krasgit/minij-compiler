@@ -10,6 +10,7 @@ public class AstLowerMain {
     Ir.Program prog; Ir.Func curFunc; Ir.Block cur;
     Map<String, Ir.Value> allocaOf = new LinkedHashMap<>();
     Map<String, String> varType = new LinkedHashMap<>();
+    Map<String, String> varElem = new LinkedHashMap<>();
     Map<String, String> methodRet = new LinkedHashMap<>();
     Map<String, String> nativeMangle = new LinkedHashMap<>();
     Deque<Ir.Block> breaks = new ArrayDeque<>(), conts = new ArrayDeque<>();
@@ -64,6 +65,7 @@ public class AstLowerMain {
     // ─── type mapping (MiniJ scalar types → IR) ─────────────────────────────
     static String mapType(String jt) {
         if (jt == null) return "i32";
+        if (jt.endsWith("[]")) return "ptr";
         switch (jt) {
             case "int": case "boolean": case "byte": case "short": case "char": return "i32";
             case "long": return "i64";
@@ -71,6 +73,20 @@ public class AstLowerMain {
             case "float": return "f64";   // P1: преобладаване на float → double (запазва динамиката, документирано)
             default: return "i32";
         }
+    }
+    /** Елементен тип на 1-D примитивен масив от Java-типа "int[]"/"long[]"/"double[]". */
+    static String elemOf(String jt) {
+        if (jt == null || !jt.endsWith("[]")) return null;
+        String c = jt.substring(0, jt.length() - 2);
+        if (c.endsWith("[]")) throw new RuntimeException("nested arrays not supported yet: " + jt);
+        String t = mapType(c);
+        if (t.equals("ptr")) throw new RuntimeException("unsupported array element type: " + jt);
+        return t;
+    }
+    /** Елементен тип на базата на индексен достъп (VariableDeclarator/param имена). */
+    String elemOfRval(Java.Rvalue e) {
+        if (e instanceof Java.AmbiguousName an) { String t = varElem.get(an.identifiers[0]); if (t != null) return t; }
+        return null;
     }
     static boolean isInt(String t) { return t != null && (t.equals("i32") || t.equals("i64")); }
     static boolean isFp(String t)  { return t != null && t.equals("f64"); }
@@ -91,8 +107,8 @@ public class AstLowerMain {
             Ir.Value c = from.equals("i64") ? emit("ITOF_64", "f64", v) : emit("ITOF", "f64", v);
             c.dbg = v.dbg; return c;
         }
-        // int↔i64 retype (no-op wide/narrow, sign-extend TODO за големи дълги)
-        Ir.Value c = to.equals("i64") ? emit("MOV_i64", "i64", v) : emit("MOV_i32", "i32", v);
+        // int↔i64 retype: int→long sign-extends (MOVSXT_i64); long→int truncates
+        Ir.Value c = to.equals("i64") ? emit("MOVSXT_i64", "i64", v) : emit("MOV_i32", "i32", v);
         c.dbg = v.dbg; return c;
     }
     /** Чиста типова проверка на израз (без lowering) — за alloca типове в ternary. */
@@ -144,12 +160,13 @@ public class AstLowerMain {
     void method(Java.MethodDeclarator m) {
         Ir.Func f = new Ir.Func(); f.name = m.name;
         f.retType = mapType(getStr(m, "type"));
+        curFunc = f; allocaOf.clear(); varType.clear(); varElem.clear(); breaks.clear(); conts.clear();
         for (Object p : m.formalParameters.parameters) {
             if (!(p instanceof Java.FunctionDeclarator.FormalParameter fp)) continue;
             String pt = mapType(getStr(fp, "type"));
+            if (pt.equals("ptr")) varElem.put(fp.name, elemOf(getStr(fp, "type")));
             f.params.add(new String[]{fp.name, pt});
         }
-        curFunc = f; allocaOf.clear(); varType.clear(); breaks.clear(); conts.clear();
         Ir.Block e = new Ir.Block("entry"); cur = e; f.blocks.add(e);
         for (int i = 0; i < f.params.size(); i++) {
             String name = f.params.get(i)[0], pt = f.params.get(i)[1];
@@ -170,6 +187,7 @@ public class AstLowerMain {
         if (s instanceof Java.LocalVariableDeclarationStatement d) {
             for (Java.VariableDeclarator vd : d.variableDeclarators) {
                 String dt = mapType(getStr(d, "type"));
+                if (dt.equals("ptr")) varElem.put(vd.name, elemOf(getStr(d, "type")));
                 Ir.Value a = emit("alloca", dt); a.dbg = tag(s);
                 allocaOf.put(vd.name, a); varType.put(vd.name, dt);
                 prog.debug.declNames.put(a.dbg, vd.name);
@@ -310,6 +328,17 @@ public class AstLowerMain {
     }
 
     void handleAssign(Java.Assignment a) {
+        if (a.lhs instanceof Java.ArrayAccessExpression aa) {
+            Ir.Value b = expr(aa.lhs);
+            Ir.Value i = conv(expr(aa.index), "i32");
+            String el = elemOfRval(aa.lhs);
+            if (el == null) throw new RuntimeException("array element type unknown at assign");
+            Ir.Value ck = emit("chk", "void", b, i); ck.dbg = tag(a);
+            Ir.Value ad = emit("lea_" + el, "ptr", b, i); ad.dbg = tag(a);
+            Ir.Value v = conv(expr(a.rhs), el);
+            Ir.Value st = emit("st_" + el, "void", ad, v); st.dbg = tag(a);
+            return;
+        }
         String name = null;
         if (a.lhs instanceof Java.AmbiguousName an) name = an.identifiers[0];
         if (name == null) { System.err.println("# assign target unsupported"); return; }
@@ -332,10 +361,42 @@ if (e == null) return konst(0, "i32", -1);
             return konst(Double.doubleToRawLongBits(Double.parseDouble(String.valueOf(get(lit, "value")))), "f64", tag(e));
         if (e instanceof Java.BooleanLiteral lit) return konst(lit.value.equals("true")?1:0, "i32", tag(e));
         if (e instanceof Java.AmbiguousName an) {
+            if (an.identifiers.length > 1) {
+                if (!an.identifiers[1].equals("length"))
+                    throw new RuntimeException("member access on non-array '" + an.identifiers[0] + "' (fields unsupported)");
+                Ir.Value al = allocaOf.get(an.identifiers[0]);
+                if (al == null) throw new RuntimeException("undefined: " + an.identifiers[0]);
+                Ir.Value b = emit("load", al.type, al); b.dbg = tag(e);
+                Ir.Value l = emit("len", "i32", b); l.dbg = tag(e);
+                return l;
+            }
             String n = an.identifiers[0];
             Ir.Value al = allocaOf.get(n);
             if (al != null) { Ir.Value l = emit("load", al.type, al); l.dbg = tag(e); return l; }
             throw new RuntimeException("undefined: " + n);
+        }
+        if (e instanceof Java.NewArray na) {
+            Object de = get(na, "dimExprs");
+            Java.Rvalue[] dims = de instanceof Java.Rvalue[] ? (Java.Rvalue[]) de : null;
+            int nd = dims == null ? 0 : dims.length;
+            int trailing = get(na, "dims") instanceof Integer i ? i : 0;
+            if (nd != 1 || trailing > 0) throw new RuntimeException("only 1-D arrays supported (" + nd + " dims)");
+            String el = mapType(getStr(na, "type"));
+            if (el.equals("ptr")) throw new RuntimeException("only primitive 1-D arrays supported");
+            Ir.Value c = conv(expr(dims[0]), "i32");
+            Ir.Value a = emit("alloc_" + el, "ptr", c); a.dbg = tag(e);
+            Ir.Value h = emit("st_hdr", "void", a, c); h.dbg = tag(e);
+            return a;
+        }
+        if (e instanceof Java.ArrayAccessExpression aa) {
+            Ir.Value b = expr(aa.lhs);
+            Ir.Value i = conv(expr(aa.index), "i32");
+            String el = elemOfRval(aa.lhs);
+            if (el == null) throw new RuntimeException("array element type unknown at access");
+            Ir.Value ck = emit("chk", "void", b, i); ck.dbg = tag(e);
+            Ir.Value ad = emit("lea_" + el, "ptr", b, i); ad.dbg = tag(e);
+            Ir.Value l = emit("ld_" + el, el, ad); l.dbg = tag(e);
+            return l;
         }
         if (e instanceof Java.BinaryOperation b) {
             Ir.Value l = expr(b.lhs), r = expr(b.rhs);

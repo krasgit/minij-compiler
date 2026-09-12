@@ -90,6 +90,30 @@ void *mm_alloc(unsigned long size, int kind) {
 }
 
 /* mm_alloc_zeroed: bump arena is already zero-filled on every boot. */
+/* ── bounds-error trap (P2) ───────────────────────────────────────────────── */
+
+#ifdef __aarch64__
+#define SYS_EXIT 93
+static void sys_exit(int status) {
+    register long x0 __asm__("x0") = status;
+    register long x8 __asm__("x8") = SYS_EXIT;
+    __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x8) : "memory");
+    __builtin_unreachable();
+}
+#else
+static void sys_exit(int status) {
+    register long rax __asm__("rax") = 60;   /* SYS_EXIT */
+    register long rdi __asm__("rdi") = status;
+    __asm__ __volatile__("syscall" : "+r"(rax) : "r"(rdi) : "rcx", "r11", "memory");
+    __builtin_unreachable();
+}
+#endif
+
+/* k_bounds_error: called on out-of-bounds array access (never returns). */
+void k_bounds_error(void) {
+    sys_exit(134);   /* 128 + SIGABRT */
+}
+
 /* ── native contract (P0/P1): k_native_<Class>_<name>_<arity> ────────────── */
 
 /* test/example natives used by examples/native.mj */

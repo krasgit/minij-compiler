@@ -189,6 +189,16 @@ public class Emitter {
                 if (cx == null) throw new RuntimeException("emit: ${imm} outside rule");
                 if (R.isFpType(cx.v.type) || cx.v.type.equals("i64")) return poolTag(cx.v);
                 return Long.toString(cx.v.imm);
+            case "imov":
+                if (cx == null) throw new RuntimeException("emit: ${imov} outside rule");
+                {
+                    long lo = cx.v.imm & 0xFFFF, hi = (cx.v.imm >> 16) & 0xFFFF;
+                    String d = reg(cx.v);
+                    StringBuilder m = new StringBuilder();
+                    m.append("movz ").append(d).append(", #").append(lo);
+                    if (hi != 0) m.append("\n").append("movk ").append(d).append(", #").append(hi).append(", lsl #16");
+                    return m.toString();
+                }
             case "name":
                 if (cx == null || cx.v.name == null) throw new RuntimeException("emit: op has no symbol name");
                 return cx.v.name;

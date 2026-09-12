@@ -44,7 +44,7 @@ epilogue {
 }
 
 emit CONST_i32() {
-    mov $dst, #${imm}
+    ${imov}
 }
 emit CONST_i64() {
     adrp ${scratch}, ${imm}
@@ -209,6 +209,9 @@ emit MOV_i64(x) {
         mov $dst, ${x}
     }
 }
+emit MOVSXT_i64(x) {
+    sxtw $dst, ${x}
+}
 emit MOV_i64(x, d) {
     if ${x} != ${d} {
         mov ${d}, ${x}
@@ -267,4 +270,78 @@ emit CALL_f64(...) {
     }
     bl ${name}
     fmov $dst, ${ret}
+}
+
+# ── P2: heap arrays over mm_alloc (header=[len:u32][pad], data at +8) ──────
+emit alloc_i32(c) {
+    sxtw x9, ${c}
+    add x9, x9, #2
+    lsl x9, x9, #2
+    mov x0, x9
+    mov x1, #0
+    bl mm_alloc
+    mov ${dst}, x0
+}
+emit alloc_i64(c) {
+    sxtw x9, ${c}
+    add x9, x9, #1
+    lsl x9, x9, #3
+    mov x0, x9
+    mov x1, #0
+    bl mm_alloc
+    mov ${dst}, x0
+}
+emit alloc_f64(c) {
+    sxtw x9, ${c}
+    add x9, x9, #1
+    lsl x9, x9, #3
+    mov x0, x9
+    mov x1, #0
+    bl mm_alloc
+    mov ${dst}, x0
+}
+emit st_hdr(a, c) {
+    str ${c}, [${a}]
+}
+emit len(a) {
+    ldr $dst, [${a}]
+}
+emit chk(a, i) {
+    sxtw x9, ${i}
+    ldr x10, [${a}]
+    cmp x10, x9
+    b.ls k_bounds_error
+}
+emit lea_i32(a, i) {
+    sxtw x9, ${i}
+    add x9, ${a}, x9, lsl #2
+    add $dst, x9, #8
+}
+emit lea_i64(a, i) {
+    sxtw x9, ${i}
+    add x9, ${a}, x9, lsl #3
+    add $dst, x9, #8
+}
+emit lea_f64(a, i) {
+    sxtw x9, ${i}
+    add x9, ${a}, x9, lsl #3
+    add $dst, x9, #8
+}
+emit ld_i32(a) {
+    ldr $dst, [${a}]
+}
+emit ld_i64(a) {
+    ldr $dst, [${a}]
+}
+emit ld_f64(a) {
+    ldr $dst, [${a}]
+}
+emit st_i32(a, v) {
+    str ${v}, [${a}]
+}
+emit st_i64(a, v) {
+    str ${v}, [${a}]
+}
+emit st_f64(a, v) {
+    str ${v}, [${a}]
 }
