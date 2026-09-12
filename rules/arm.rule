@@ -2,9 +2,15 @@ regs: x19 x20 x21 x22 x23 x24 x25 x26 x27 x28
 args: x0 x1 x2 x3 x4 x5 x6 x7
 ret: x0
 fallback: x9
+scratch: x9
 
 # rule v2: 32-bit views of the 64-bit pool (used for i32 values)
 subs: x19=w19, x20=w20, x21=w21, x22=w22, x23=w23, x24=w24, x25=w25, x26=w26, x27=w27, x28=w28, x0=w0, x1=w1, x2=w2, x3=w3, x4=w4, x5=w5, x6=w6, x7=w7, x9=w9
+
+# double pool / FP ABI (scalar double)
+fregs: d19 d20 d21 d22 d23 d24 d25 d26 d27 d28
+fargs: d0 d1 d2 d3 d4 d5 d6 d7
+fret: d0
 
 prologue {
     stp x29, x30, [sp, #-16]!
@@ -14,10 +20,20 @@ prologue {
     stp x23, x24, [sp, #-16]!
     stp x25, x26, [sp, #-16]!
     stp x27, x28, [sp, #-16]!
+    stp d19, d20, [sp, #-16]!
+    stp d21, d22, [sp, #-16]!
+    stp d23, d24, [sp, #-16]!
+    stp d25, d26, [sp, #-16]!
+    stp d27, d28, [sp, #-16]!
     ${params}
 }
 
 epilogue {
+    ldp d27, d28, [sp], #16
+    ldp d25, d26, [sp], #16
+    ldp d23, d24, [sp], #16
+    ldp d21, d22, [sp], #16
+    ldp d19, d20, [sp], #16
     ldp x27, x28, [sp], #16
     ldp x25, x26, [sp], #16
     ldp x23, x24, [sp], #16
@@ -29,6 +45,14 @@ epilogue {
 
 emit CONST_i32() {
     mov $dst, #${imm}
+}
+emit CONST_i64() {
+    adrp ${scratch}, ${imm}
+    ldr ${dst}, [${scratch}, :lo12:${imm}]
+}
+emit CONST_f64() {
+    adrp ${scratch}, ${imm}
+    ldr ${dst}, [${scratch}, :lo12:${imm}]
 }
 
 emit ADD_i32(x, y) {
@@ -46,6 +70,39 @@ emit DIV_i32(x, y) {
 emit MOD_i32(x, y) {
     sdiv w9, ${x}, ${y}
     msub $dst, w9, ${y}, ${x}
+}
+
+emit ADD_i64(x, y) {
+    add $dst, ${x}, ${y}
+}
+emit SUB_i64(x, y) {
+    sub $dst, ${x}, ${y}
+}
+emit MUL_i64(x, y) {
+    mul $dst, ${x}, ${y}
+}
+emit DIV_i64(x, y) {
+    sdiv $dst, ${x}, ${y}
+}
+emit MOD_i64(x, y) {
+    sdiv x9, ${x}, ${y}
+    msub $dst, x9, ${y}, ${x}
+}
+
+emit ADD_f64(x, y) {
+    fadd $dst, ${x}, ${y}
+}
+emit SUB_f64(x, y) {
+    fsub $dst, ${x}, ${y}
+}
+emit MUL_f64(x, y) {
+    fmul $dst, ${x}, ${y}
+}
+emit DIV_f64(x, y) {
+    fdiv $dst, ${x}, ${y}
+}
+emit NEG_f64(x) {
+    fneg $dst, ${x}
 }
 
 emit CMPLT_i32(x, y) {
@@ -73,6 +130,70 @@ emit CMPNE_i32(x, y) {
     cset $dst, ne
 }
 
+emit CMPLT_i64(x, y) {
+    cmp ${x}, ${y}
+    cset $dst, lt
+}
+emit CMPGT_i64(x, y) {
+    cmp ${x}, ${y}
+    cset $dst, gt
+}
+emit CMPLE_i64(x, y) {
+    cmp ${x}, ${y}
+    cset $dst, le
+}
+emit CMPGE_i64(x, y) {
+    cmp ${x}, ${y}
+    cset $dst, ge
+}
+emit CMPEQ_i64(x, y) {
+    cmp ${x}, ${y}
+    cset $dst, eq
+}
+emit CMPNE_i64(x, y) {
+    cmp ${x}, ${y}
+    cset $dst, ne
+}
+
+emit CMPLT_f64(x, y) {
+    fcmp ${x}, ${y}
+    cset $dst, mi
+}
+emit CMPGT_f64(x, y) {
+    fcmp ${x}, ${y}
+    cset $dst, gt
+}
+emit CMPLE_f64(x, y) {
+    fcmp ${x}, ${y}
+    cset $dst, ls
+}
+emit CMPGE_f64(x, y) {
+    fcmp ${x}, ${y}
+    cset $dst, ge
+}
+emit CMPEQ_f64(x, y) {
+    fcmp ${x}, ${y}
+    cset $dst, eq
+}
+emit CMPNE_f64(x, y) {
+    fcmp ${x}, ${y}
+    cset $dst, ne
+}
+
+emit ITOF(x) {
+    sxtw ${scratch}, ${x}
+    scvtf $dst, ${scratch}
+}
+emit ITOF_64(x) {
+    scvtf $dst, ${x}
+}
+emit FTOI(x) {
+    fcvtzs $dst, ${x}
+}
+emit FTOI_64(x) {
+    fcvtzs $dst, ${x}
+}
+
 emit MOV_i32(x) {
     if ${x} != $dst {
         mov $dst, ${x}
@@ -81,6 +202,26 @@ emit MOV_i32(x) {
 emit MOV_i32(x, d) {
     if ${x} != ${d} {
         mov ${d}, ${x}
+    }
+}
+emit MOV_i64(x) {
+    if ${x} != $dst {
+        mov $dst, ${x}
+    }
+}
+emit MOV_i64(x, d) {
+    if ${x} != ${d} {
+        mov ${d}, ${x}
+    }
+}
+emit MOV_f64(x) {
+    if ${x} != $dst {
+        fmov $dst, ${x}
+    }
+}
+emit MOV_f64(x, d) {
+    if ${x} != ${d} {
+        fmov ${d}, ${x}
     }
 }
 
@@ -93,18 +234,37 @@ emit jump(t) {
     b ${t}
 }
 
-emit return() {
-    b ${exit}
-}
-emit return(v) {
+emit RETURN_i32(v) {
     mov ${ret}, ${v}
     b ${exit}
 }
+emit RETURN_i64(v) {
+    mov ${ret}, ${v}
+    b ${exit}
+}
+emit RETURN_f64(v) {
+    fmov ${ret}, ${v}
+    b ${exit}
+}
 
-emit call(...) {
+emit CALL_i32(...) {
     for each ${args} i {
-        mov ${argregs}[i], ${args}[i]
+        ${ws}[i] ${argregs}[i], ${args}[i]
     }
     bl ${name}
     mov $dst, ${ret}
+}
+emit CALL_i64(...) {
+    for each ${args} i {
+        ${ws}[i] ${argregs}[i], ${args}[i]
+    }
+    bl ${name}
+    mov $dst, ${ret}
+}
+emit CALL_f64(...) {
+    for each ${args} i {
+        ${ws}[i] ${argregs}[i], ${args}[i]
+    }
+    bl ${name}
+    fmov $dst, ${ret}
 }

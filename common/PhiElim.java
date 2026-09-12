@@ -15,7 +15,8 @@ public class PhiElim {
                         if (mk.name != null) for (Ir.Block bb : f.blocks) if (bb.name.equals(mk.name)) { pred = bb; break; }
                         if (pred == null) pred = byHash.get((int)mk.imm);
                         if (pred == null) continue;
-                        Ir.Value mov = new Ir.Value("MOV_i32","i32", val, v);
+                        String s = Ir.suffix(v.type);
+                        Ir.Value mov = new Ir.Value("MOV_" + s, v.type, val, v);
                         mov.dbg = v.dbg;
                         inserts.computeIfAbsent(pred, k -> new ArrayList<>()).add(mov);
                     }

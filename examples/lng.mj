@@ -1,0 +1,16 @@
+public class L {
+    public static int main() {
+        long a = 1000000L;
+        long b = 7L;
+        long c = a * b;
+        long d = c / 100000L;
+        long e = d - 2L;
+        int lo = (int) e;
+        puti(lo);
+        puti((int)(e % 5L));
+        long f = -3L;
+        if (a > 999999L) { if (f < 0L) puti(1); else puti(0); }
+        else puti(0);
+        return 0;
+    }
+}

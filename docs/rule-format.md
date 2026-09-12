@@ -86,7 +86,9 @@ emit OP(pat1, pat2, ...) {
 | `${ret}` | `ret:` от header-а |
 | `${exit}` | exit label-а на функцията (`.L<fn>_exit`) |
 | `${params}` | параметър-копията (виж prologue) |
-| `${args}[i]` / `${argregs}[i]` | в `for each` — `i`-тия аргумент на инструкцията / арг. регистър |
+| `${args}[i]` / `${argregs}[i]` | в `for each` — `i`-тия аргумент на инструкцията / арг. регистър (FP тип → `fargs`, инт. → `args`) |
+| `${scratch}` | scratch регистъра от header-а (arm `x9` / x86 `%r10`) |
+| `${ws}[i]` | move-мнемониката за типа на `i`-тия аргумент (arm: `fmov`/`mov`; x86: `movsd`/`movq`/`movl`) |
 | `$$` | буквално `$` (за x86 immediate: `movl $$${imm}, %eax`) |
 
 Позициите се заместват директно в ниската на шаблона; `; dbg`, `.loc`, labels на блокове

@@ -9,6 +9,8 @@ import org.codehaus.janino.Java;
 public class AstLowerMain {
     Ir.Program prog; Ir.Func curFunc; Ir.Block cur;
     Map<String, Ir.Value> allocaOf = new LinkedHashMap<>();
+    Map<String, String> varType = new LinkedHashMap<>();
+    Map<String, String> methodRet = new LinkedHashMap<>();
     Deque<Ir.Block> breaks = new ArrayDeque<>(), conts = new ArrayDeque<>();
     int dbgSeq = 1;
 
@@ -45,7 +47,6 @@ public class AstLowerMain {
     }
     static String getStr(Object o, String field) { Object v = get(o, field); return v == null ? null : v.toString(); }
     static List<?> getList(Object o, String field) { Object v = get(o, field); return v instanceof List ? (List<?>) v : null; }
-    static Optional<?> getOpt(Object o, String field) { Object v = get(o, field); return v instanceof Optional ? (Optional<?>) v : null; }
 
     int tag(Java.Locatable n) {
         int id = dbgSeq++;
@@ -56,50 +57,112 @@ public class AstLowerMain {
         return id;
     }
     Ir.Value emit(String op, String type, Ir.Value... args) { Ir.Value v = new Ir.Value(op, type, args); cur.ins.add(v); return v; }
-    Ir.Value konst(long v, int dbg) { Ir.Value x = new Ir.Value("const","i32"); x.imm=v; x.dbg=dbg; cur.ins.add(x); return x; }
+    Ir.Value konst(long v, String type, int dbg) { Ir.Value x = new Ir.Value("const", type); x.imm=v; x.dbg=dbg; cur.ins.add(x); return x; }
     Ir.Value blockRef(Ir.Block b) { Ir.Value v = new Ir.Value("block","ptr"); v.imm=b.hashCode(); v.name=b.name; return v; }
+
+    // ─── type mapping (MiniJ scalar types → IR) ─────────────────────────────
+    static String mapType(String jt) {
+        if (jt == null) return "i32";
+        switch (jt) {
+            case "int": case "boolean": case "byte": case "short": case "char": return "i32";
+            case "long": return "i64";
+            case "double": return "f64";
+            case "float": return "f64";   // P1: преобладаване на float → double (запазва динамиката, документирано)
+            default: return "i32";
+        }
+    }
+    static boolean isInt(String t) { return t != null && (t.equals("i32") || t.equals("i64")); }
+    static boolean isFp(String t)  { return t != null && t.equals("f64"); }
+    static String wide(String a, String b) {
+        if (isFp(a) || isFp(b)) return "f64";
+        if (a.equals("i64") || b.equals("i64")) return "i64";
+        return "i32";
+    }
+    /** Транспонира товар значение `v` към целития тип `to` (доколкото се налага). */
+    Ir.Value conv(Ir.Value v, String to) {
+        String from = v.type;
+        if (from.equals(to)) return v;
+        if (isFp(from) && isInt(to)) {
+            Ir.Value c = to.equals("i64") ? emit("FTOI_64", "i64", v) : emit("FTOI", "i32", v);
+            c.dbg = v.dbg; return c;
+        }
+        if (isInt(from) && isFp(to)) {
+            Ir.Value c = from.equals("i64") ? emit("ITOF_64", "f64", v) : emit("ITOF", "f64", v);
+            c.dbg = v.dbg; return c;
+        }
+        v.type = to;                                   // i32↔i64 retype (sign-extend: TODO за големи дълги)
+        return v;
+    }
+    /** Чиста типова проверка на израз (без lowering) — за alloca типове в ternary. */
+    static String inferType(Java.Rvalue e, AstLowerMain m) {
+        if (e == null) return "i32";
+        if (e instanceof Java.ParenthesizedExpression pe) return inferType((Java.Rvalue) pe.value, m);
+        if (e instanceof Java.IntegerLiteral lit)
+            return (lit.value.endsWith("L") || lit.value.endsWith("l")) ? "i64" : "i32";
+        if (e instanceof Java.BooleanLiteral) return "i32";
+        if (e instanceof Java.FloatingPointLiteral) return "f64";
+        if (e instanceof Java.AmbiguousName an) {
+            String s = m.varType.get(an.identifiers[0]);
+            return s == null ? "i32" : s;
+        }
+        if (e instanceof Java.BinaryOperation b)
+            return wide(inferType((Java.Rvalue) b.lhs, m), inferType((Java.Rvalue) b.rhs, m));
+        if (e instanceof Java.Cast c) return mapType(getStr(c, "targetType"));
+        if (e instanceof Java.UnaryOperation u)
+            return u.operator.equals("!") ? "i32" : inferType(u.operand, m);
+        if (e instanceof Java.MethodInvocation mi) {
+            String r = m.methodRet.get(mi.methodName);
+            return r == null ? "i32" : r;
+        }
+        return "i32";
+    }
 
     void cls(Java.ClassDeclaration cd) {
         List<?> methods = getList(cd, "declaredMethods");
         if (methods == null) return;
-        for (Object mo : methods) {
-            if (!(mo instanceof Java.MethodDeclarator m)) continue;
-            method(m);
-        }
+        for (Object mo : methods)
+            if (mo instanceof Java.MethodDeclarator md)
+                methodRet.put(md.name, mapType(getStr(md, "type")));
+        for (Object mo : methods)
+            if (mo instanceof Java.MethodDeclarator m) method(m);
     }
 
     void method(Java.MethodDeclarator m) {
         Ir.Func f = new Ir.Func(); f.name = m.name;
+        f.retType = mapType(getStr(m, "type"));
         for (Object p : m.formalParameters.parameters) {
-            String name = p instanceof Java.FunctionDeclarator.FormalParameter fp ? fp.name : "?";
-            f.params.add(new String[]{name, "i32"});
+            if (!(p instanceof Java.FunctionDeclarator.FormalParameter fp)) continue;
+            String pt = mapType(getStr(fp, "type"));
+            f.params.add(new String[]{fp.name, pt});
         }
-        curFunc = f; allocaOf.clear(); breaks.clear(); conts.clear();
+        curFunc = f; allocaOf.clear(); varType.clear(); breaks.clear(); conts.clear();
         Ir.Block e = new Ir.Block("entry"); cur = e; f.blocks.add(e);
         for (int i = 0; i < f.params.size(); i++) {
-            String name = f.params.get(i)[0];
-            Ir.Value a = emit("alloca","i32"); a.dbg = dbgSeq++;
-            allocaOf.put(name, a);
+            String name = f.params.get(i)[0], pt = f.params.get(i)[1];
+            Ir.Value a = emit("alloca", pt); a.dbg = dbgSeq++;
+            allocaOf.put(name, a); varType.put(name, pt);
             prog.debug.declNames.put(a.dbg, name);
-            prog.debug.declTypes.put(a.dbg, "i32");
-            Ir.Value pm = new Ir.Value("param","i32"); pm.imm = i;
-            Ir.Value st = emit("store","void",a,pm);
+            prog.debug.declTypes.put(a.dbg, pt);
+            Ir.Value pm = new Ir.Value("param", pt); pm.imm = i;
+            Ir.Value st = emit("store","void",a,pm); st.dbg = a.dbg;
         }
         for (Object s : m.statements) if (s instanceof Java.BlockStatement bs) stmt(bs);
-        if (cur.term()==null || !Ir.isTerm(cur.term().op)) emit("return","void",konst(0,-1));
+        if (cur.term()==null || !Ir.isTerm(cur.term().op))
+            emit("return","void", f.retType.equals("void") ? null : konst(0, f.retType.equals("void") ? "i32" : f.retType, -1));
         prog.funcs.add(f);
     }
 
     void stmt(Java.BlockStatement s) {
         if (s instanceof Java.LocalVariableDeclarationStatement d) {
             for (Java.VariableDeclarator vd : d.variableDeclarators) {
-                Ir.Value a = emit("alloca","i32"); a.dbg = tag(s);
-                allocaOf.put(vd.name, a);
+                String dt = mapType(getStr(d, "type"));
+                Ir.Value a = emit("alloca", dt); a.dbg = tag(s);
+                allocaOf.put(vd.name, a); varType.put(vd.name, dt);
                 prog.debug.declNames.put(a.dbg, vd.name);
-                prog.debug.declTypes.put(a.dbg, "i32");
+                prog.debug.declTypes.put(a.dbg, dt);
                 Object init = vd.initializer;
                 if (init instanceof Java.Rvalue rv) {
-                    Ir.Value v = expr(rv);
+                    Ir.Value v = conv(expr(rv), dt);
                     Ir.Value st = emit("store","void",a,v); st.dbg = a.dbg;
                 }
             }
@@ -179,7 +242,6 @@ public class AstLowerMain {
                 if (Boolean.TRUE.equals(get(groups.get(i), "hasDefaultLabel"))) realDefault = i;
             }
             Ir.Block dflt = realDefault >= 0 ? gblk[realDefault] : new Ir.Block("swd_"+id); // micro-block if no `default:`
-            // flatten case labels (a default group may also carry labels → they target that same group)
             List<Long> lv = new ArrayList<>();
             List<Integer> lg = new ArrayList<>();
             for (int i = 0; i < n; i++)
@@ -196,13 +258,12 @@ public class AstLowerMain {
                 emit("jump","void",blockRef(cblk[0]));
                 for (int j = 0; j < m; j++) {
                     curFunc.blocks.add(cblk[j]); cur = cblk[j];
-                    Ir.Value kn = konst(lv.get(j), tag(sw));
-                    Ir.Value eq = emit("cmpeq","i32",v,kn); eq.dbg = tag(sw);
+                    Ir.Value kn = konst(lv.get(j), "i32", tag(sw));
+                    Ir.Value eq = emit("cmpeq", "i32", v, kn); eq.dbg = tag(sw);
                     Ir.Block elseT = (j + 1 < m) ? cblk[j+1] : dflt;
                     emit("branch","void",eq,blockRef(gblk[lg.get(j)]),blockRef(elseT));
                 }
             }
-            // group bodies (textual order) with fallthrough; break → exit
             breaks.push(exit);
             for (int i = 0; i < n; i++) {
                 curFunc.blocks.add(gblk[i]); cur = gblk[i];
@@ -219,8 +280,11 @@ public class AstLowerMain {
             curFunc.blocks.add(exit); cur = exit;
         } else if (s instanceof Java.ReturnStatement r) {
             Object rv = get(r, "returnValue");
-            if (rv instanceof Java.Rvalue rvv) emit("return","void",expr(rvv));
-            else emit("return","void");
+            if (rv instanceof Java.Rvalue rvv) {
+                String rt = curFunc.retType;
+                if (rt.equals("void")) emit("return","void",expr(rvv));
+                else emit("return","void",conv(expr(rvv), rt));
+            } else emit("return","void");
         } else if (s instanceof Java.Block b) {
             if (b.statements != null) for (Java.BlockStatement x : b.statements) stmt(x);
         } else if (s instanceof Java.BreakStatement) {
@@ -237,42 +301,62 @@ public class AstLowerMain {
         if (name == null) { System.err.println("# assign target unsupported"); return; }
         Ir.Value al = allocaOf.get(name);
         if (al == null) { System.err.println("# undefined: " + name); return; }
-        Ir.Value v = expr(a.rhs);
+        Ir.Value v = conv(expr(a.rhs), varType.getOrDefault(name, al.type));
         Ir.Value st = emit("store","void",al,v); st.dbg = tag(a);
     }
 
     Ir.Value expr(Java.Rvalue e) {
-if (e == null) return konst(0, -1);
+if (e == null) return konst(0, "i32", -1);
         if (e instanceof Java.ParenthesizedExpression pe) return expr(pe.value);
-        if (e instanceof Java.IntegerLiteral lit) return konst(Long.parseLong(lit.value), tag(e));
-        if (e instanceof Java.BooleanLiteral lit) return konst(lit.value.equals("true")?1:0, tag(e));
+        if (e instanceof Java.IntegerLiteral lit) {
+            String vs = lit.value;
+            boolean isL = vs.endsWith("L") || vs.endsWith("l");
+            if (isL) vs = vs.substring(0, vs.length()-1);
+            return konst(Long.parseLong(vs), isL ? "i64" : "i32", tag(e));
+        }
+        if (e instanceof Java.FloatingPointLiteral lit)
+            return konst(Double.doubleToRawLongBits(Double.parseDouble(String.valueOf(get(lit, "value")))), "f64", tag(e));
+        if (e instanceof Java.BooleanLiteral lit) return konst(lit.value.equals("true")?1:0, "i32", tag(e));
         if (e instanceof Java.AmbiguousName an) {
             String n = an.identifiers[0];
             Ir.Value al = allocaOf.get(n);
-            if (al != null) { Ir.Value l = emit("load",al.type,al); l.dbg = tag(e); return l; }
+            if (al != null) { Ir.Value l = emit("load", al.type, al); l.dbg = tag(e); return l; }
             throw new RuntimeException("undefined: " + n);
         }
         if (e instanceof Java.BinaryOperation b) {
             Ir.Value l = expr(b.lhs), r = expr(b.rhs);
-            Ir.Value v = emit(mapOp(b.operator), "i32", l, r); v.dbg = tag(b); return v;
+            String w = wide(l.type, r.type);
+            if (!w.equals("i32")) { l = conv(l, w); r = conv(r, w); }
+            String base = mapOp(b.operator);
+            boolean cmp = base.startsWith("cmp");
+            Ir.Value v = emit(base, cmp ? "i32" : w, l, r); v.dbg = tag(b); return v;
         }
         if (e instanceof Java.UnaryOperation u) {
             Ir.Value a = expr(u.operand);
-            if (u.operator.equals("-")) { Ir.Value v = emit("sub","i32",konst(0,tag(u)),a); v.dbg=tag(u); return v; }
-            if (u.operator.equals("!")) { Ir.Value v = emit("cmpeq","i32",a,konst(0,tag(u))); v.dbg=tag(u); return v; }
+            if (u.operator.equals("-")) {
+                if (isFp(a.type)) { Ir.Value v = emit("NEG_f64", "f64", a); v.dbg=tag(u); return v; }
+                Ir.Value z = konst(0, a.type, tag(u));
+                Ir.Value v = emit("sub", a.type, z, a); v.dbg=tag(u); return v;
+            }
+            if (u.operator.equals("!")) { Ir.Value v = emit("cmpeq","i32",a,konst(0,"i32",tag(u))); v.dbg=tag(u); return v; }
+        }
+        if (e instanceof Java.Cast c) {
+            Ir.Value v = expr((Java.Rvalue) get(c, "value"));
+            return conv(v, mapType(getStr(c, "targetType")));
         }
         if (e instanceof Java.ConditionalExpression te) {
             Ir.Value c = expr(te.lhs);
+            String tt = inferType((Java.Rvalue) te.mhs, this);
             int id = dbgSeq++;
             Ir.Block t = new Ir.Block("t_"+id), f = new Ir.Block("f_"+id), j = new Ir.Block("tj_"+id);
-            Ir.Value tmp = emit("alloca","i32"); tmp.dbg = tag(te);
+            Ir.Value tmp = emit("alloca", tt); tmp.dbg = tag(te);
             Ir.Value br = emit("branch","void",c,blockRef(t),blockRef(f));
             curFunc.blocks.add(t); cur = t;
-            Ir.Value tv = expr(te.mhs);
+            Ir.Value tv = conv(expr(te.mhs), tt);
             Ir.Value st1 = emit("store","void",tmp,tv); st1.dbg = tag(te);
             emit("jump","void",blockRef(j));
             curFunc.blocks.add(f); cur = f;
-            Ir.Value fv = expr(te.rhs);
+            Ir.Value fv = conv(expr(te.rhs), tt);
             Ir.Value st2 = emit("store","void",tmp,fv); st2.dbg = tag(te);
             emit("jump","void",blockRef(j));
             curFunc.blocks.add(j); cur = j;
@@ -282,14 +366,16 @@ if (e == null) return konst(0, -1);
         if (e instanceof Java.MethodInvocation mi) {
             List<Ir.Value> args = new ArrayList<>();
             for (Java.Rvalue a : mi.arguments) if (a != null) args.add(expr(a));
-            Ir.Value call = emit("call","i32");
+            String rt = methodRet.getOrDefault(mi.methodName, "i32");
+            if (rt.equals("void")) rt = "i32";
+            Ir.Value call = emit("call", rt);
             call.name = mi.methodName;
             call.args.addAll(args);
             call.dbg = tag(mi);
             return call;
         }
         System.err.println("# unsupported expr: " + e.getClass().getSimpleName());
-        return konst(0,-1);
+        return konst(0,"i32",-1);
     }
 
     static String mapOp(String op) {

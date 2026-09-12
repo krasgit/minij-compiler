@@ -33,7 +33,11 @@ public class Ir {
     }
     public static boolean isTerm(String op) {
         return op.equals("jump")||op.equals("branch")||op.equals("return")
-            || op.equals("JMP")||op.equals("BRANCH")||op.equals("RETURN");
+            || op.equals("JMP")||op.equals("BRANCH")||op.equals("RETURN")
+            || op.startsWith("RETURN_");
+    }
+    public static String suffix(String type) {
+        return type != null && type.equals("i64") ? "i64" : (type != null && type.equals("f64") ? "f64" : "i32");
     }
     public static class Writer {
         Map<Value,Integer> vid = new HashMap<>(); int next = 0;
@@ -91,7 +95,7 @@ public class Ir {
             String o = v.op;
             if (o.equals("jump")||o.equals("JMP")) { sb.append("    jump ").append(bn(v.args.get(0))).append(d).append("\n"); return; }
             if (o.equals("branch")||o.equals("BRANCH")) { sb.append("    branch %").append(id(v.args.get(0))).append(", ").append(bn(v.args.get(1))).append(", ").append(bn(v.args.get(2))).append(d).append("\n"); return; }
-            if (o.equals("return")||o.equals("RETURN")) { sb.append("    return"); if (!v.args.isEmpty()) sb.append(" %").append(id(v.args.get(0))); sb.append(d).append("\n"); return; }
+            if (o.equals("return")||o.equals("RETURN")||o.startsWith("RETURN_")) { sb.append("    return"); if (!v.args.isEmpty()) sb.append(" %").append(id(v.args.get(0))); sb.append(d).append("\n"); return; }
             if (o.equals("store")||o.equals("STORE_i32")) { sb.append("    store %").append(id(v.args.get(0))).append(", %").append(id(v.args.get(1))).append(d).append("\n"); return; }
             if (o.equals("alloca")||o.equals("ALLOCA")) { sb.append("    %").append(id(v)).append(" = alloca ").append(v.type).append(d).append("\n"); return; }
             if (o.equals("phi")||o.startsWith("PHI_")) {
@@ -101,7 +105,9 @@ public class Ir {
                 sb.append(d).append("\n"); return;
             }
             if (o.equals("call")||o.startsWith("CALL_")) {
-                sb.append("    %").append(id(v)).append(" = call ").append(v.name!=null?v.name:"?").append("(");
+                String kw = o.startsWith("CALL_") ? o : "call";
+                String nm = v.name != null ? v.name : "?";
+                sb.append("    %").append(id(v)).append(" = ").append(kw).append(" ").append(nm).append(":").append(v.type).append("(");
                 for (int i=0;i<v.args.size();i++) { if (i>0) sb.append(", "); sb.append("%").append(id(v.args.get(i))); }
                 sb.append(")").append(d).append("\n"); return;
             }
@@ -213,6 +219,7 @@ public class Ir {
                     Value pv = values.get(Integer.parseInt(pp[1].substring(1)));
                     if (pv == null) { pv = new Value(); pv.op = "param"; values.put(Integer.parseInt(pp[1].substring(1)), pv); }
                     pv.op = "param"; pv.type = "i32"; pv.imm = Long.parseLong(pp[2]);
+                    if (cur != null && pv.imm < cur.params.size()) pv.type = cur.params.get((int)pv.imm)[1];
                     next(); continue;
                 }
                 if (l.endsWith("{") && !l.startsWith(".")) {
@@ -243,7 +250,7 @@ public class Ir {
                 Value v = new Value("branch","void",lookup(cid),tb,eb); v.dbg=dbg; curB.ins.add(v); return;
             }
             if (body.startsWith("return")) {
-                Value v = new Value("return","void"); String r = body.substring(6).trim();
+                Value v = new Value("RETURN_" + suffix(cur.retType), "void"); String r = body.substring(6).trim();
                 if (!r.isEmpty() && r.startsWith("%")) v.args.add(lookup(Integer.parseInt(r.substring(1))));
                 v.dbg=dbg; curB.ins.add(v); return;
             }
@@ -271,11 +278,14 @@ public class Ir {
                     String pre = s.substring(0, lp).trim();
                     String[] pr = pre.split("\\s+");
                     v.name = pr.length>1 ? pr[1] : "?";
+                    int colon = v.name.lastIndexOf(':');
+                    if (colon > 0) { v.type = v.name.substring(colon+1); v.name = v.name.substring(0, colon); }
+                    else v.type = "i32";
                     for (String a : s.substring(lp+1, rp).split(",")) {
                         a = a.trim(); if (a.startsWith("%")) v.args.add(lookup(Integer.parseInt(a.substring(1))));
                     }
-                }
-                v.type = "i32"; return v;
+                } else v.type = "i32";
+                return v;
             }
             if (v.op.startsWith("PHI_") || v.op.equals("phi")) {
                 v.type = parts[1];

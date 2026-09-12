@@ -49,7 +49,7 @@ public class RuleParser {
     public static class Rules {
         public List<String> regs = new ArrayList<>();
         public List<String> args = new ArrayList<>();
-        public String ret, fallback;
+        public String ret, fallback, scratch;
         // ── rule v2 ─────────────────────────────────────────────────────────
         public Map<String, String> subs = new LinkedHashMap<>(); // base → 32-bit view
         public List<String> fregs = new ArrayList<>();           // FP pool (d8.. / xmm..)
@@ -105,7 +105,7 @@ public class RuleParser {
             if (t.startsWith("fregs:")) { r.fregs = toks(t.substring(6)); pos[0]++; continue; }
             if (t.startsWith("fargs:")) { r.fargs = toks(t.substring(6)); pos[0]++; continue; }
             if (t.startsWith("fret:")) { r.fret = first(t.substring(5)); pos[0]++; continue; }
-            if (t.startsWith("scratch:")) { pos[0]++; continue; }
+            if (t.startsWith("scratch:")) { r.scratch = first(t.substring(8)); pos[0]++; continue; }
             if (t.startsWith("ret:")) { r.ret = first(t.substring(4)); pos[0]++; continue; }
             if (t.startsWith("fallback:")) { r.fallback = first(t.substring(9)); pos[0]++; continue; }
             if (t.startsWith("prologue")) { pos[0]++; r.prologue = readBlock(lines, pos); continue; }
@@ -266,7 +266,7 @@ public class RuleParser {
         // placeholder-name sanity per rule
     }
     static void checkPh(Rule ru) {
-        Set<String> allowed = new LinkedHashSet<>(Arrays.asList("dst", "imm", "name", "ret", "exit", "args", "argregs", "params"));
+        Set<String> allowed = new LinkedHashSet<>(Arrays.asList("dst", "imm", "name", "ret", "exit", "args", "argregs", "params", "scratch", "ws"));
         allowed.addAll(ru.pat);
         for (Stmt s : ru.body) checkStmt(s, allowed);
     }

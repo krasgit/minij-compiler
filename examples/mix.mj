@@ -1,0 +1,13 @@
+public class M {
+    public static double half(double v) {
+        return v / 2.0;
+    }
+    public static int main() {
+        double d = half(9.0);
+        int i = (int) d;
+        double s = d + 2;
+        puti((int) s);
+        puti(i);
+        return 0;
+    }
+}

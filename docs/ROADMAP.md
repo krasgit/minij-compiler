@@ -16,13 +16,23 @@
 > **Статус (P0 core изпълнено):** `.rule v2` (`subs/fregs/fargs/fret`) + width-резолюция в
 > Emitter; Regalloc с FP пул и споделен stack slot; `rules/{arm,x86}.rule` → 64-bit пул + subs;
 > AstLower: `do`/ternary/`switch` (JCC); `runtime/` (crt0.S, runtime.c: `putc/puti/puts`,
-> `mm_alloc` bump seam); 8/8 регресия на arm64, baseline 4 байт-идентичен с оракула.
-> Останало за P0/P1: `native` контракт + типизирани ops + `-lc` линк в `mc`.
+> `mm_alloc` bump seam); 8/8 регресия на arm64, baseline байт-идентичен с оракула.
+> Останало за P0/P1: `native` контракт + `-lc` линк в `mc` (вж. P1 статус).
 
 ## P1 — Типове
 - long (i64), byte/short/char/boolean → i8 + sign/zero extension.
 - float/double: FP пул, FP ops, FP ABI (d0–d7 / xmm), FP constants.
 - SSA constant folding за нови типове, `params()` по тип.
+
+> **Статус (P1 — long/double изпълнено):** типизиран фронтенд (AstLower: `mapType`,
+> `conv()` ITOF/FTOI/ITOF_64/FTOI_64/retype, `methodRet` таблица, typed alloca/store/load/
+> param/call/return, литерали за `L`-long и FP — битове в `imm`); typed SSA
+> (phi/undef през `nameTypes`); type-aware SSA-lower (ADD_i64/ADD_f64/CMP_*/CALL_*/RETURN_*/...);
+> `Param`/call аргументи по тип; FP пул (`fregs/fargs/fret`, `d19–d28`/`%xmm8-15` saves в
+> prologue за call-безопасност), literal pool (`adrp+ldr` arm / `movabsq`+`movsd(%rip)` x86),
+> `${scratch}` и `${ws}[i]` плейсхолдери. Примери `dbl.mj`/`lng.mj`/`mix.mj`; регресия
+> **11/11 (arm64)**, твърд x86 oracle refresh. Останало: `native` контракт + `-lc` линк в `mc`;
+> byte/short/char/boolean → i8 + sign/zero extension; i64 sign-extend при i32↔i64 retype; f32.
 
 ## P2 — Памет / масиви / String
 - Heap през **`mm_alloc`** (GC-agnostic seam, без GC).

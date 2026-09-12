@@ -1,0 +1,15 @@
+public class D {
+    public static int main() {
+        double x = 6.0;
+        double y = x / 2.0 + 1.0;
+        double z = y * 3.0;
+        int big = 0;
+        if (z > 10.0) big = 1; else big = 0;
+        puti(big);
+        int r = (int)(z / 6.0);
+        puti(r);
+        double t = (double) 5 / 2.0;
+        puti((int) t);
+        return 0;
+    }
+}

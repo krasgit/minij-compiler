@@ -7,11 +7,13 @@ public class Opt {
         if (dce(f)) ch = true;
         return ch;
     }
+    static boolean isFpT(String t) { return t != null && (t.equals("f32") || t.equals("f64") || t.equals("float") || t.equals("double")); }
     static boolean fold(Ir.Block b) {
         boolean ch = false;
         for (Ir.Value v : b.ins) {
             if (v.args.size() != 2) continue;
             Ir.Value a = v.args.get(0), c = v.args.get(1);
+            if (isFpT(a.type) || isFpT(c.type)) continue;   // FP consts са битови шаблони, не числа
             boolean ac = a.op.equals("const")||a.op.startsWith("CONST_");
             boolean cc = c.op.equals("const")||c.op.startsWith("CONST_");
             if (ac && cc) {

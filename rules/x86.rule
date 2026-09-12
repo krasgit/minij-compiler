@@ -2,9 +2,15 @@ regs: %rbx %r12 %r13 %r14 %r15
 args: %rdi %rsi %rdx %rcx %r8 %r9
 ret: %rax
 fallback: %rax
+scratch: %r10
 
 # rule v2: 32-bit views of the 64-bit pool (used for i32 values)
 subs: %rbx=%ebx, %r12=%r12d, %r13=%r13d, %r14=%r14d, %r15=%r15d, %rdi=%edi, %rsi=%esi, %rdx=%edx, %rcx=%ecx, %r8=%r8d, %r9=%r9d, %rax=%eax
+
+# double pool / FP ABI (scalar double)
+fregs: %xmm8 %xmm9 %xmm10 %xmm11 %xmm12 %xmm13 %xmm14 %xmm15
+fargs: %xmm0 %xmm1 %xmm2 %xmm3 %xmm4 %xmm5 %xmm6 %xmm7
+fret: %xmm0
 
 prologue {
     pushq %rbp
@@ -14,12 +20,28 @@ prologue {
     pushq %r13
     pushq %r14
     pushq %r15
-    subq  $128, %rsp
+    subq  $192, %rsp
+    movq  %xmm8,  -8(%rsp)
+    movq  %xmm9,  -16(%rsp)
+    movq  %xmm10, -24(%rsp)
+    movq  %xmm11, -32(%rsp)
+    movq  %xmm12, -40(%rsp)
+    movq  %xmm13, -48(%rsp)
+    movq  %xmm14, -56(%rsp)
+    movq  %xmm15, -64(%rsp)
     ${params}
 }
 
 epilogue {
-    addq  $128, %rsp
+    movq  -8(%rsp),  %xmm8
+    movq  -16(%rsp), %xmm9
+    movq  -24(%rsp), %xmm10
+    movq  -32(%rsp), %xmm11
+    movq  -40(%rsp), %xmm12
+    movq  -48(%rsp), %xmm13
+    movq  -56(%rsp), %xmm14
+    movq  -64(%rsp), %xmm15
+    addq  $192, %rsp
     popq  %r15
     popq  %r14
     popq  %r13
@@ -31,6 +53,12 @@ epilogue {
 
 emit CONST_i32() {
     movl $$${imm}, $dst
+}
+emit CONST_i64() {
+    movabsq $${imm}, $dst
+}
+emit CONST_f64() {
+    movsd ${imm}(%rip), $dst
 }
 
 emit ADD_i32(x, y) {
@@ -56,6 +84,53 @@ emit MOD_i32(x, y) {
     cltd
     idivl ${y}
     movl %edx, $dst
+}
+
+emit ADD_i64(x, y) {
+    movq ${x}, $dst
+    addq ${y}, $dst
+}
+emit SUB_i64(x, y) {
+    movq ${x}, $dst
+    subq ${y}, $dst
+}
+emit MUL_i64(x, y) {
+    movq ${x}, $dst
+    imulq ${y}, $dst
+}
+emit DIV_i64(x, y) {
+    movq ${x}, %rax
+    cqto
+    idivq ${y}
+    movq %rax, $dst
+}
+emit MOD_i64(x, y) {
+    movq ${x}, %rax
+    cqto
+    idivq ${y}
+    movq %rdx, $dst
+}
+
+emit ADD_f64(x, y) {
+    movsd ${x}, $dst
+    addsd ${y}, $dst
+}
+emit SUB_f64(x, y) {
+    movsd ${x}, $dst
+    subsd ${y}, $dst
+}
+emit MUL_f64(x, y) {
+    movsd ${x}, $dst
+    mulsd ${y}, $dst
+}
+emit DIV_f64(x, y) {
+    movsd ${x}, $dst
+    divsd ${y}, $dst
+}
+emit NEG_f64(x) {
+    movsd ${x}, $dst
+    xorpd $dst, $dst
+    subsd ${x}, $dst
 }
 
 emit CMPLT_i32(x, y) {
@@ -95,6 +170,93 @@ emit CMPNE_i32(x, y) {
     movzbl %al, $dst
 }
 
+emit CMPLT_i64(x, y) {
+    movq ${x}, %rax
+    cmpq ${y}, %rax
+    setl %al
+    movzbl %al, $dst
+}
+emit CMPGT_i64(x, y) {
+    movq ${x}, %rax
+    cmpq ${y}, %rax
+    setg %al
+    movzbl %al, $dst
+}
+emit CMPLE_i64(x, y) {
+    movq ${x}, %rax
+    cmpq ${y}, %rax
+    setle %al
+    movzbl %al, $dst
+}
+emit CMPGE_i64(x, y) {
+    movq ${x}, %rax
+    cmpq ${y}, %rax
+    setge %al
+    movzbl %al, $dst
+}
+emit CMPEQ_i64(x, y) {
+    movq ${x}, %rax
+    cmpq ${y}, %rax
+    sete %al
+    movzbl %al, $dst
+}
+emit CMPNE_i64(x, y) {
+    movq ${x}, %rax
+    cmpq ${y}, %rax
+    setne %al
+    movzbl %al, $dst
+}
+
+emit CMPLT_f64(x, y) {
+    ucomisd ${y}, ${x}
+    movl  $0, %eax
+    setb  %al
+    movl  %eax, $dst
+}
+emit CMPGT_f64(x, y) {
+    ucomisd ${y}, ${x}
+    movl  $0, %eax
+    seta  %al
+    movl  %eax, $dst
+}
+emit CMPLE_f64(x, y) {
+    ucomisd ${y}, ${x}
+    movl  $0, %eax
+    setbe %al
+    movl  %eax, $dst
+}
+emit CMPGE_f64(x, y) {
+    ucomisd ${y}, ${x}
+    movl  $0, %eax
+    setae %al
+    movl  %eax, $dst
+}
+emit CMPEQ_f64(x, y) {
+    ucomisd ${y}, ${x}
+    movl  $0, %eax
+    sete  %al
+    movl  %eax, $dst
+}
+emit CMPNE_f64(x, y) {
+    ucomisd ${y}, ${x}
+    movl  $0, %eax
+    setne %al
+    movl  %eax, $dst
+}
+
+emit ITOF(x) {
+    cvtsi2sdl ${x}, $dst
+}
+emit ITOF_64(x) {
+    cvtsi2sdq ${x}, $dst
+}
+emit FTOI(x) {
+    cvttsd2si ${x}, $dst
+}
+emit FTOI_64(x) {
+    cvttsd2siq ${x}, $dst
+}
+
 emit MOV_i32(x) {
     if ${x} != $dst {
         movl ${x}, $dst
@@ -103,6 +265,26 @@ emit MOV_i32(x) {
 emit MOV_i32(x, d) {
     if ${x} != ${d} {
         movl ${x}, ${d}
+    }
+}
+emit MOV_i64(x) {
+    if ${x} != $dst {
+        movq ${x}, $dst
+    }
+}
+emit MOV_i64(x, d) {
+    if ${x} != ${d} {
+        movq ${x}, ${d}
+    }
+}
+emit MOV_f64(x) {
+    if ${x} != $dst {
+        movsd ${x}, $dst
+    }
+}
+emit MOV_f64(x, d) {
+    if ${x} != ${d} {
+        movsd ${x}, ${d}
     }
 }
 
@@ -115,18 +297,37 @@ emit jump(t) {
     jmp ${t}
 }
 
-emit return() {
-    jmp ${exit}
-}
-emit return(v) {
+emit RETURN_i32(v) {
     movl ${v}, ${ret}
     jmp ${exit}
 }
+emit RETURN_i64(v) {
+    movq ${v}, ${ret}
+    jmp ${exit}
+}
+emit RETURN_f64(v) {
+    movsd ${v}, ${ret}
+    jmp ${exit}
+}
 
-emit call(...) {
+emit CALL_i32(...) {
     for each ${args} i {
-        movl ${argregs}[i], ${args}[i]
+        ${ws}[i] ${argregs}[i], ${args}[i]
     }
     callq ${name}
     movl ${ret}, $dst
+}
+emit CALL_i64(...) {
+    for each ${args} i {
+        ${ws}[i] ${argregs}[i], ${args}[i]
+    }
+    callq ${name}
+    movq ${ret}, $dst
+}
+emit CALL_f64(...) {
+    for each ${args} i {
+        ${ws}[i] ${argregs}[i], ${args}[i]
+    }
+    callq ${name}
+    movsd ${ret}, $dst
 }

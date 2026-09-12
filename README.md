@@ -93,8 +93,9 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): 8/8 теста на arm64
-(47, 12, 55, 55, 55, 5, 92, print `123/-7/A`).
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **11/11 теста на arm64**
+(47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
+всеки — exit code + stdout чек).
 
 ## Пътна карта
 

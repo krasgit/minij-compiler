@@ -9,7 +9,7 @@ public class Emitter {
 
     static final Set<String> SKIP = new HashSet<>(Arrays.asList(
         "store","STORE_i32","load","LOAD_i32","alloca","ALLOCA",
-        "block","symbol","undef","phi","PHI_i32"));
+        "block","symbol","undef","phi","PHI_i32","PHI_i64","PHI_f64"));
 
     public static String emit(Ir.Program p, String target, String ruleFile) throws Exception {
         Emitter e = new Emitter();
@@ -21,9 +21,32 @@ public class Emitter {
         return e.out.toString();
     }
 
+    // ─── FP / 64-bit literal pool ───────────────────────────────────────────
+    Map<Ir.Value, String> poolLabels = new LinkedHashMap<>();
+    Map<Ir.Value, Long> poolBits = new LinkedHashMap<>();
+    int poolSeq = 0;
+
+    String poolTag(Ir.Value v) {
+        String l = poolLabels.get(v);
+        if (l == null) { l = ".LC" + (poolSeq++); poolLabels.put(v, l); poolBits.put(v, v.imm); }
+        return l;
+    }
+
+    void rodata() {
+        if (poolLabels.isEmpty()) return;
+        out.append("    .section .rodata\n");
+        for (var e : poolLabels.entrySet()) {
+            Ir.Value v = e.getKey();
+            out.append(".LC" ).append(Integer.parseInt(e.getValue().substring(3)))
+               .append(": .").append(v.op.startsWith("CONST_f") && v.type.equals("f32") ? "long" : "quad")
+               .append(" ").append(poolBits.get(v)).append("\n");
+        }
+    }
+
     void go() {
         out.append("    .file 1 \"").append(prog.module).append(".mj\"\n    .text\n\n");
         for (Ir.Func f : prog.funcs) func(f);
+        rodata();
     }
 
     String reg(Ir.Value v) {
@@ -95,7 +118,6 @@ public class Emitter {
             case "JMP": return "jump";
             case "RETURN": return "return";
             default:
-                if (o.startsWith("CALL_")) return "call";
                 if (o.equals("branch") || o.equals("jump") || o.equals("return")) return o;
                 return o;
         }
@@ -160,14 +182,31 @@ public class Emitter {
                 return reg(cx.v);
             case "imm":
                 if (cx == null) throw new RuntimeException("emit: ${imm} outside rule");
+                if (R.isFpType(cx.v.type) || cx.v.type.equals("i64")) return poolTag(cx.v);
                 return Long.toString(cx.v.imm);
             case "name":
                 if (cx == null || cx.v.name == null) throw new RuntimeException("emit: op has no symbol name");
                 return cx.v.name;
             case "ret":
-                if (R.ret == null) throw new RuntimeException("emit: 'ret:' missing in rule file");
-                return R.width(R.ret, fn != null ? fn.retType : "i32");
+                if (cx == null) throw new RuntimeException("emit: ${ret} outside rule");
+                {
+                    String rt = cx.v.op.startsWith("RETURN") ? (fn != null ? fn.retType : "i32") : cx.v.type;
+                    if (rt == null) rt = "i32";
+                    return R.isFpType(rt) ? (R.fret != null ? R.width(R.fret, rt) : R.ret) : R.width(R.ret, rt);
+                }
             case "exit":  return exit();
+            case "scratch": return R.width(R.scratch != null ? R.scratch : (R.fallback != null ? R.fallback : "x9"), cx != null ? cx.v.type : "i32");
+            case "ws":
+                if (!idx) throw new RuntimeException("emit: ${ws} must be used as ${ws}[i]");
+                if (cx == null || loopIdx < 0 || loopIdx >= cx.v.args.size()) throw new RuntimeException("emit: ${ws}[i] index out of range");
+                {
+                    Ir.Value av = cx.v.args.get(loopIdx);
+                    String vt = av.type;
+                    boolean fp = vt != null && (vt.equals("f32") || vt.equals("f64") || vt.equals("float") || vt.equals("double"));
+                    boolean i64 = vt != null && vt.equals("i64");
+                    if (arch.equals("arm64")) return fp ? "fmov" : "mov";
+                    else return fp ? "movsd" : (i64 ? "movq" : "movl");
+                }
             case "params": return params();
             case "args":
                 if (!idx) throw new RuntimeException("emit: ${args} must be used as ${args}[i]");
@@ -175,11 +214,19 @@ public class Emitter {
                 return reg(cx.v.args.get(loopIdx));
             case "argregs":
                 if (!idx) throw new RuntimeException("emit: ${argregs} must be used as ${argregs}[i]");
-                if (loopIdx < 0 || loopIdx >= R.args.size()) throw new RuntimeException("emit: ${argregs}[i] index out of range");
+                if (cx == null || loopIdx < 0 || loopIdx >= cx.v.args.size()) throw new RuntimeException("emit: ${argregs}[i] index out of range");
                 {
-                    Ir.Value av = (cx != null && loopIdx < cx.v.args.size()) ? cx.v.args.get(loopIdx) : null;
-                    String t = av != null ? av.type : "i32";
-                    return R.width(R.args.get(loopIdx), t);
+                    int fi = 0, ii = 0;
+                    for (int k = 0; k < loopIdx; k++) {
+                        String kt = cx.v.args.get(k).type;
+                        if (kt != null && (kt.equals("f32") || kt.equals("f64") || kt.equals("float") || kt.equals("double"))) fi++; else ii++;
+                    }
+                    String t = cx.v.args.get(loopIdx).type;
+                    boolean fp = t != null && (t.equals("f32") || t.equals("f64") || t.equals("float") || t.equals("double"));
+                    String reg = fp ? (fi < R.fargs.size() ? R.fargs.get(fi) : null)
+                                    : (ii < R.args.size() ? R.args.get(ii) : null);
+                    if (reg == null) throw new RuntimeException("emit: arg register index out of range");
+                    return R.width(reg, t);
                 }
             default:
                 if (cx != null && cx.bind.containsKey(name)) return valReg(cx.bind.get(name));
@@ -219,8 +266,11 @@ public class Emitter {
             String arg = R.width(argreg, fp ? ptype : "i32");
             if (b.length() > 0) b.append("\n");
             b.append("    ");
-            if (arm) b.append("mov ").append(home).append(", ").append(arg);
-            else b.append("movl  ").append(arg).append(", ").append(home);
+            if (arm) b.append(fp ? "fmov " : "mov ").append(home).append(", ").append(arg);
+            else {
+                boolean i64 = ptype.equals("i64");
+                b.append(fp ? "movsd " : (i64 ? "movq " : "movl ")).append(arg).append(", ").append(home);
+            }
         }
         return b.toString();
     }
