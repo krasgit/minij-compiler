@@ -21,6 +21,15 @@ Linear IR → SSA.
 - Всеки phi има вход за всеки predecessor.
 - Няма alloca/load/store.
 
+## Формат на изхода (.ssa)
+
+Същият IR текстов формат като `.lir` (виж [docs/ir-format.md](../../docs/ir-format.md)),
+но без `alloca`/`store`/`load` (промоутирани) и **плюс**:
+
+- `phi`: `%i = phi i32 [head: %v] [exit: %v2] ...` — по двойка (блок, входна стойност)
+- `copy`: `%i = copy i32 %v` — за стойности, влизащи в блок (по-късно `MOV_i32`)
+- `.debug_vars [ "name" : versions=[%3, %7] ]` — SSA версиите на всяка локална
+
 ## Свързани
 
 - преди: ast-lower

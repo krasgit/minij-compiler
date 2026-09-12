@@ -41,6 +41,13 @@
              ─ emit-x86     → source.s
              ─ as + ld      → executable
 
+## Формати
+
+Всички IR файлове (`.lir`, `.ssa`, `.mir`) ползват **една** текстова граматика —
+[docs/ir-format.md](docs/ir-format.md); етапите се различават само по набора ops.
+Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](docs/rule-format.md).
+Форматът на всеки tool е документиран в неговия README (секция "Формат").
+
 ## Инспекция
 
     ./mc --stage=ast examples/gcd.mj

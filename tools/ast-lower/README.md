@@ -23,6 +23,24 @@ Janino AST → Linear IR (.lir).
 - `declNames` — име на всяка локална.
 - `positions` — line:col.
 
+## Формат на изхода (.lir)
+
+IR текстов формат (виж [docs/ir-format.md](../../docs/ir-format.md)) с generic ops.
+Пример:
+
+    .func main() -> i32 {
+      entry {
+        %1 = alloca i32  ; dbg 1
+        %2 = const i32 42  ; dbg 2
+        store %1, %2
+        %3 = load i32 %1
+        return %3
+      }
+    }
+
+На този етап променливите са `alloca` + `store`/`load`; блоковете на цикли/if имат имена
+`head_N`, `body_N`, `step_N`, `exit_N`, `then_N`, `else_N`, `join_N`.
+
 ## Свързани
 
 - преди: janino-parse

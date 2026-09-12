@@ -15,3 +15,18 @@ Target по подразбиране е x86-64. Ако `.rule` не е пода�
 
 - `bin/emit-x86` → `EmitMain "$@"` — x86-64
 - `bin/emit-arm` → `EmitMain "$@" --target=arm64` — ARM64
+
+## Формат
+
+Вход: `.mir`(с `.locations` от regalloc, след phi-elim) + `.rule` шаблон
+(граматика: [docs/rule-format.md](../../docs/rule-format.md); IR формат:
+[docs/ir-format.md](../../docs/ir-format.md)).
+
+Изход: `.s` — асемблерен файл:
+
+- Java-страната (`Emitter`) добавя: header `.file 1 "<module>.mj"` / `.text`, по функция
+  `.globl <fn>` + `fn:`, блокови labels `.L<fn>_<hash>` и exit label `.L<fn>_exit`,
+  `.loc 1 line col` ред преди всяка инструкция с dbg информация.
+- Инструкциите идват изцяло от шаблоните в `.rule` (prologue, epilogue, emit правила);
+  всеки `.rule` ред → 1 асемблерен ред (нормализиран на 4 space indent).
+- Ако даден op няма rule за своята аритити, emit хвърля `no rule for op '...'`.
