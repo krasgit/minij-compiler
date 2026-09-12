@@ -258,13 +258,13 @@ emit FTOI_64(x) {
 }
 
 emit MOV_i32(x) {
-    if ${x} != $dst {
-        movl ${x}, $dst
+    if ${x:sub32} != $dst {
+        movl ${x:sub32}, $dst
     }
 }
 emit MOV_i32(x, d) {
-    if ${x} != ${d} {
-        movl ${x}, ${d}
+    if ${x:sub32} != ${d:sub32} {
+        movl ${x:sub32}, ${d:sub32}
     }
 }
 emit MOV_i64(x) {

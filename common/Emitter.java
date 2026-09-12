@@ -35,6 +35,7 @@ public class Emitter {
     void rodata() {
         if (poolLabels.isEmpty()) return;
         out.append("    .section .rodata\n");
+        out.append("    .p2align 3\n");
         for (var e : poolLabels.entrySet()) {
             Ir.Value v = e.getKey();
             out.append(".LC" ).append(Integer.parseInt(e.getValue().substring(3)))
@@ -176,6 +177,10 @@ public class Emitter {
 
     String resolve(String name, boolean idx, Ctx cx) {
         name = strip(name);
+        if (name.endsWith(":sub32")) {
+            String base = name.substring(0, name.length() - 6);
+            return R.width(resolve(base, idx, cx), "i32");
+        }
         switch (name) {
             case "dst":
                 if (cx == null) throw new RuntimeException("emit: $dst outside rule");
@@ -230,7 +235,8 @@ public class Emitter {
                 }
             default:
                 if (cx != null && cx.bind.containsKey(name)) return valReg(cx.bind.get(name));
-                throw new RuntimeException("emit: unresolved placeholder '${" + name + "}'");
+                throw new RuntimeException("emit: unresolved placeholder '${" + name + "}' in rule '"
+                        + (cx != null && cx.v != null ? cx.v.op : "?") + "'");
         }
     }
 

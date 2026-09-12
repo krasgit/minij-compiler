@@ -1,0 +1,11 @@
+class N {
+    static native int foo(int x);
+    static native double fp(double x);
+    static native long lng(long x);
+
+    public static void main(String[] a) {
+        puti(foo(7));
+        puti((int) fp(3.5));
+        puti((int) lng(4L));
+    }
+}

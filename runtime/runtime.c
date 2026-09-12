@@ -90,3 +90,9 @@ void *mm_alloc(unsigned long size, int kind) {
 }
 
 /* mm_alloc_zeroed: bump arena is already zero-filled on every boot. */
+/* ── native contract (P0/P1): k_native_<Class>_<name>_<arity> ────────────── */
+
+/* test/example natives used by examples/native.mj */
+int k_native_N_foo_1(int x) { return x * 2; }
+double k_native_N_fp_1(double x) { return x * 2.0; }
+long k_native_N_lng_1(long x) { return x + 1L; }

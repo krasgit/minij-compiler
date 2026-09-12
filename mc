@@ -47,13 +47,23 @@ fi
 
 if [ "$TARGET" = "arm64" ]; then
     aarch64-linux-gnu-as "$BASE.s" -o "$BASE.o" 2>/dev/null || as "$BASE.s" -o "$BASE.o"
-    aarch64-linux-gnu-ld "$BASE.o" -o "$OUT" 2>/dev/null || ld "$BASE.o" -o "$OUT"
 else
     as "$BASE.s" -o "$BASE.o"
-    ld "$BASE.o" -o "$OUT"
 fi
 
+# ─── link: program + runtime (crt0.o, runtime.o) + libc ────────────────────
+if [ "$TARGET" = "arm64" ]; then
+    CC="${AARCH64_CC:-aarch64-linux-gnu-gcc}"
+    if ! command -v "$CC" >/dev/null 2>&1; then CC=gcc; fi
+else
+    CC="${CC:-gcc}"
+fi
+"$CC" -fno-stack-protector -ffreestanding -O2 -c "$DIR/runtime/runtime.c" -o "$BASE.runtime.o"
+"$CC" -c "$DIR/runtime/crt0.S" -o "$BASE.crt0.o" 2>/dev/null \
+    || as "$DIR/runtime/crt0.S" -o "$BASE.crt0.o"
+"$CC" -nostartfiles "$BASE.o" "$BASE.crt0.o" "$BASE.runtime.o" -lc -o "$OUT"
+
 if [ "$KEEP" = "0" ]; then
-    rm -f "$BASE.ast" "$BASE.lir" "$BASE.ssa" "$BASE.opt.ssa" "$BASE.mir" "$BASE.alloc.mir" "$BASE.final.mir" "$BASE.s" "$BASE.o"
+    rm -f "$BASE.ast" "$BASE.lir" "$BASE.ssa" "$BASE.opt.ssa" "$BASE.mir" "$BASE.alloc.mir" "$BASE.final.mir" "$BASE.s" "$BASE.o" "$BASE.runtime.o" "$BASE.crt0.o"
 fi
 echo "✓ compiled → $OUT"

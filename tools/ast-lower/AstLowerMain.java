@@ -11,6 +11,7 @@ public class AstLowerMain {
     Map<String, Ir.Value> allocaOf = new LinkedHashMap<>();
     Map<String, String> varType = new LinkedHashMap<>();
     Map<String, String> methodRet = new LinkedHashMap<>();
+    Map<String, String> nativeMangle = new LinkedHashMap<>();
     Deque<Ir.Block> breaks = new ArrayDeque<>(), conts = new ArrayDeque<>();
     int dbgSeq = 1;
 
@@ -90,8 +91,9 @@ public class AstLowerMain {
             Ir.Value c = from.equals("i64") ? emit("ITOF_64", "f64", v) : emit("ITOF", "f64", v);
             c.dbg = v.dbg; return c;
         }
-        v.type = to;                                   // i32↔i64 retype (sign-extend: TODO за големи дълги)
-        return v;
+        // int↔i64 retype (no-op wide/narrow, sign-extend TODO за големи дълги)
+        Ir.Value c = to.equals("i64") ? emit("MOV_i64", "i64", v) : emit("MOV_i32", "i32", v);
+        c.dbg = v.dbg; return c;
     }
     /** Чиста типова проверка на израз (без lowering) — за alloca типове в ternary. */
     static String inferType(Java.Rvalue e, AstLowerMain m) {
@@ -120,11 +122,23 @@ public class AstLowerMain {
     void cls(Java.ClassDeclaration cd) {
         List<?> methods = getList(cd, "declaredMethods");
         if (methods == null) return;
-        for (Object mo : methods)
-            if (mo instanceof Java.MethodDeclarator md)
-                methodRet.put(md.name, mapType(getStr(md, "type")));
-        for (Object mo : methods)
-            if (mo instanceof Java.MethodDeclarator m) method(m);
+        String cn = getStr(cd, "name");
+        if (cn == null) cn = "T";
+        for (Object mo : methods) {
+            if (!(mo instanceof Java.MethodDeclarator md)) continue;
+            methodRet.put(md.name, mapType(getStr(md, "type")));
+            if (getStr(md,"type") != null && !getStr(md,"type").isEmpty()) System.err.println("#dbg md=" + md.name + " type=" + getStr(md,"type") + " native=" + md.isNative());
+            if (md.isNative()) {
+                int ar = (md.formalParameters != null && md.formalParameters.parameters != null)
+                        ? md.formalParameters.parameters.length : 0;
+                nativeMangle.put(md.name, "k_native_" + cn + "_" + md.name + "_" + ar);
+            }
+        }
+        for (Object mo : methods) {
+            if (!(mo instanceof Java.MethodDeclarator m)) continue;
+            if (m.isNative()) continue;
+            method(m);
+        }
     }
 
     void method(Java.MethodDeclarator m) {
@@ -367,9 +381,10 @@ if (e == null) return konst(0, "i32", -1);
             List<Ir.Value> args = new ArrayList<>();
             for (Java.Rvalue a : mi.arguments) if (a != null) args.add(expr(a));
             String rt = methodRet.getOrDefault(mi.methodName, "i32");
+            if (true) System.err.println("#dbg call " + mi.methodName + " -> rt=" + rt + " mangle=" + nativeMangle.getOrDefault(mi.methodName, "-"));
             if (rt.equals("void")) rt = "i32";
             Ir.Value call = emit("call", rt);
-            call.name = mi.methodName;
+            call.name = nativeMangle.getOrDefault(mi.methodName, mi.methodName);
             call.args.addAll(args);
             call.dbg = tag(mi);
             return call;
