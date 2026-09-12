@@ -39,7 +39,7 @@
              ─ regalloc     → source.alloc.mir
              ─ phi-elim     → source.final.mir
              ─ emit-x86     → source.s
-             ─ as + ld      → executable
+             ─ as + ld      → executable (crt0.o + runtime.o за puti/putc/mm_alloc)
 
 ## Формати
 
@@ -91,14 +91,28 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
     ./test.sh
 
+`/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
+не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): 8/8 теста на arm64
+(47, 12, 55, 55, 55, 5, 92, print `123/-7/A`).
+
+## Пътна карта
+
+Пълен план P0–P8: [docs/ROADMAP.md](docs/ROADMAP.md).
+Core lib договор (API-огледало на java.base): [docs/corelib.md](docs/corelib.md).
+
+Кратко: P0 (инфраструктура/`.rule v2`) → P1 (типове) → P2 (памет/масиви/String) → P3 (обекти/header) → P3.5 (GC) → P4 (контрол) → P5 (exceptions) → P6 (core lib) → P7 (threads/concurrency) → P8 (модерен Java).
+
 ## Структура
 
     compiler/
     ├── build.sh, mc, test.sh
-    ├── README.md, docs/grammar.md
+    ├── README.md, docs/grammar.md, docs/ROADMAP.md, docs/corelib.md, docs/rule-format.md
     ├── lib/janino.jar
-    ├── bin/               — 9 wrapper скриптове (emit-arm/emit-x86 → shared emit)
+    ├── bin/               — wrapper скриптове (emit-arm/emit-x86 → shared emit)
     ├── common/            — shared: Ir, Ssa, Opt, Regalloc, Emitter
     ├── tools/             — main-ове на tools + shared emit main
-    ├── rules/             — x86.rule, arm.rule
-    └── examples/          — hello.mj, gcd.mj, fib.mj, forloop.mj
+    ├── rules/             — x86.rule, arm.rule (.rule v2: regs+subs+fregs/fargs/fret)
+    ├── runtime/           — crt0.S + runtime.c (putc/puti/puts/exit, mm_alloc seam)
+    ├── corelib/           — draft core library (java.lang/java.util .mj + README)
+    └── examples/          — hello, gcd, fib, forloop, dowhile, ternary, switch, print (.mj)

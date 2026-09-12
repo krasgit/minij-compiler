@@ -15,7 +15,7 @@ public class RegallocMain {
         if (!Files.exists(Path.of(rf))) throw new RuntimeException("cannot find " + rf);
         RuleParser.Rules rules = RuleParser.parse(Files.readString(Path.of(rf)));
         Ir.Program p = Ir.Reader.parse(src);
-        Regalloc.run(p, rules.regs);
+        Regalloc.run(p, rules.regs, rules.fregs);
         String out = Ir.Writer.print(p);
         if (args[1].equals("-")) System.out.print(out); else Files.writeString(Path.of(args[1]), out);
     }

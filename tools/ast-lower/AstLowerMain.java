@@ -129,6 +129,19 @@ public class AstLowerMain {
             if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(h));
             breaks.pop(); conts.pop();
             curFunc.blocks.add(x); cur = x;
+        } else if (s instanceof Java.DoStatement dw) {
+            int id = dbgSeq++;
+            Ir.Block b = new Ir.Block("body_"+id), h = new Ir.Block("head_"+id), x = new Ir.Block("exit_"+id);
+            emit("jump","void",blockRef(b));   // body runs at least once
+            breaks.push(x); conts.push(h);
+            curFunc.blocks.add(b); cur = b;
+            stmt((Java.BlockStatement) get(dw, "body"));
+            if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(h));
+            curFunc.blocks.add(h); cur = h;
+            Ir.Value c = expr(dw.condition);
+            emit("branch","void",c,blockRef(b),blockRef(x));
+            breaks.pop(); conts.pop();
+            curFunc.blocks.add(x); cur = x;
         } else if (s instanceof Java.ForStatement f) {
             if (f.init != null) stmt(f.init);
             int id = dbgSeq++;
@@ -153,6 +166,57 @@ public class AstLowerMain {
             if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(h));
             breaks.pop(); conts.pop();
             curFunc.blocks.add(x); cur = x;
+        } else if (s instanceof Java.SwitchStatement sw) {
+            int id = dbgSeq++;
+            Ir.Block exit = new Ir.Block("swx_"+id);
+            Ir.Value v = expr((Java.Rvalue) get(sw, "condition"));
+            List<?> groups = getList(sw, "sbsgs");
+            int n = groups == null ? 0 : groups.size();
+            int realDefault = -1;
+            Ir.Block[] gblk = new Ir.Block[n];
+            for (int i = 0; i < n; i++) {
+                gblk[i] = new Ir.Block("swg_"+id+"_"+i);
+                if (Boolean.TRUE.equals(get(groups.get(i), "hasDefaultLabel"))) realDefault = i;
+            }
+            Ir.Block dflt = realDefault >= 0 ? gblk[realDefault] : new Ir.Block("swd_"+id); // micro-block if no `default:`
+            // flatten case labels (a default group may also carry labels → they target that same group)
+            List<Long> lv = new ArrayList<>();
+            List<Integer> lg = new ArrayList<>();
+            for (int i = 0; i < n; i++)
+                for (Object cl : getList(groups.get(i), "caseLabels")) {
+                    lv.add(Long.parseLong(String.valueOf(get(cl, "value")).trim()));
+                    lg.add(i);
+                }
+            int m = lv.size();
+            if (m == 0) {
+                emit("jump","void",blockRef(realDefault >= 0 ? gblk[realDefault] : exit));
+            } else {
+                Ir.Block[] cblk = new Ir.Block[m];
+                for (int j = 0; j < m; j++) cblk[j] = new Ir.Block("swi_"+id+"_"+j);
+                emit("jump","void",blockRef(cblk[0]));
+                for (int j = 0; j < m; j++) {
+                    curFunc.blocks.add(cblk[j]); cur = cblk[j];
+                    Ir.Value kn = konst(lv.get(j), tag(sw));
+                    Ir.Value eq = emit("cmpeq","i32",v,kn); eq.dbg = tag(sw);
+                    Ir.Block elseT = (j + 1 < m) ? cblk[j+1] : dflt;
+                    emit("branch","void",eq,blockRef(gblk[lg.get(j)]),blockRef(elseT));
+                }
+            }
+            // group bodies (textual order) with fallthrough; break → exit
+            breaks.push(exit);
+            for (int i = 0; i < n; i++) {
+                curFunc.blocks.add(gblk[i]); cur = gblk[i];
+                for (Object bs : getList(groups.get(i), "blockStatements"))
+                    if (bs instanceof Java.BlockStatement bss) stmt(bss);
+                if (cur.term()==null||!Ir.isTerm(cur.term().op))
+                    emit("jump","void",blockRef(i + 1 < n ? gblk[i+1] : exit));
+            }
+            breaks.pop();
+            if (realDefault < 0 && m > 0) {
+                curFunc.blocks.add(dflt); cur = dflt;
+                emit("jump","void",blockRef(exit));
+            }
+            curFunc.blocks.add(exit); cur = exit;
         } else if (s instanceof Java.ReturnStatement r) {
             Object rv = get(r, "returnValue");
             if (rv instanceof Java.Rvalue rvv) emit("return","void",expr(rvv));
@@ -179,6 +243,7 @@ public class AstLowerMain {
 
     Ir.Value expr(Java.Rvalue e) {
 if (e == null) return konst(0, -1);
+        if (e instanceof Java.ParenthesizedExpression pe) return expr(pe.value);
         if (e instanceof Java.IntegerLiteral lit) return konst(Long.parseLong(lit.value), tag(e));
         if (e instanceof Java.BooleanLiteral lit) return konst(lit.value.equals("true")?1:0, tag(e));
         if (e instanceof Java.AmbiguousName an) {
@@ -195,6 +260,24 @@ if (e == null) return konst(0, -1);
             Ir.Value a = expr(u.operand);
             if (u.operator.equals("-")) { Ir.Value v = emit("sub","i32",konst(0,tag(u)),a); v.dbg=tag(u); return v; }
             if (u.operator.equals("!")) { Ir.Value v = emit("cmpeq","i32",a,konst(0,tag(u))); v.dbg=tag(u); return v; }
+        }
+        if (e instanceof Java.ConditionalExpression te) {
+            Ir.Value c = expr(te.lhs);
+            int id = dbgSeq++;
+            Ir.Block t = new Ir.Block("t_"+id), f = new Ir.Block("f_"+id), j = new Ir.Block("tj_"+id);
+            Ir.Value tmp = emit("alloca","i32"); tmp.dbg = tag(te);
+            Ir.Value br = emit("branch","void",c,blockRef(t),blockRef(f));
+            curFunc.blocks.add(t); cur = t;
+            Ir.Value tv = expr(te.mhs);
+            Ir.Value st1 = emit("store","void",tmp,tv); st1.dbg = tag(te);
+            emit("jump","void",blockRef(j));
+            curFunc.blocks.add(f); cur = f;
+            Ir.Value fv = expr(te.rhs);
+            Ir.Value st2 = emit("store","void",tmp,fv); st2.dbg = tag(te);
+            emit("jump","void",blockRef(j));
+            curFunc.blocks.add(j); cur = j;
+            Ir.Value l = emit("load",tmp.type,tmp); l.dbg = tag(te);
+            return l;
         }
         if (e instanceof Java.MethodInvocation mi) {
             List<Ir.Value> args = new ArrayList<>();

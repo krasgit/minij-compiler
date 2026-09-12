@@ -1,7 +1,10 @@
-regs: w19 w20 w21 w22 w23 w24 w25 w26 w27 w28
-args: w0 w1 w2 w3 w4 w5 w6 w7
-ret: w0
-fallback: w9
+regs: x19 x20 x21 x22 x23 x24 x25 x26 x27 x28
+args: x0 x1 x2 x3 x4 x5 x6 x7
+ret: x0
+fallback: x9
+
+# rule v2: 32-bit views of the 64-bit pool (used for i32 values)
+subs: x19=w19, x20=w20, x21=w21, x22=w22, x23=w23, x24=w24, x25=w25, x26=w26, x27=w27, x28=w28, x0=w0, x1=w1, x2=w2, x3=w3, x4=w4, x5=w5, x6=w6, x7=w7, x9=w9
 
 prologue {
     stp x29, x30, [sp, #-16]!

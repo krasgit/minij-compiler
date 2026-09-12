@@ -50,9 +50,31 @@ public class RuleParser {
         public List<String> regs = new ArrayList<>();
         public List<String> args = new ArrayList<>();
         public String ret, fallback;
+        // ── rule v2 ─────────────────────────────────────────────────────────
+        public Map<String, String> subs = new LinkedHashMap<>(); // base → 32-bit view
+        public List<String> fregs = new ArrayList<>();           // FP pool (d8.. / xmm..)
+        public List<String> fargs = new ArrayList<>();           // FP ABI arg regs (d0..)
+        public String fret;                                      // FP return reg (d0)
         public List<Stmt> prologue = new ArrayList<>();
         public List<Stmt> epilogue = new ArrayList<>();
         public LinkedHashMap<String, List<Rule>> ops = new LinkedHashMap<>();
+
+        /** 32-bit view of `name` for type i32 (idempotent for other types / v1 rules). */
+        public String width(String name, String type) {
+            if (name == null) return null;
+            if ("i32".equals(type)) {
+                String s = subs.get(name);
+                if (s != null) return s;
+            }
+            return name;
+        }
+        public boolean isIntType(String type) {
+            if (type == null) return true;
+            return type.equals("i32") || type.equals("i64") || type.equals("ptr") || type.equals("address");
+        }
+        public boolean isFpType(String type) {
+            return type != null && (type.equals("f32") || type.equals("f64") || type.equals("float") || type.equals("double"));
+        }
     }
 
     // ─── parser ─────────────────────────────────────────────────────────────
@@ -65,6 +87,24 @@ public class RuleParser {
             if (t.isEmpty() || t.startsWith("#")) { pos[0]++; continue; }
             if (t.startsWith("regs:")) { r.regs = toks(t.substring(5)); pos[0]++; continue; }
             if (t.startsWith("args:")) { r.args = toks(t.substring(5)); pos[0]++; continue; }
+            if (t.startsWith("subs:") || t.startsWith("pairs:")) {
+                int off = t.startsWith("pairs:") ? 6 : 5;
+                for (String p : t.substring(off).replace(";", "").split(",")) {
+                    p = p.trim();
+                    if (p.isEmpty()) continue;
+                    int eq = p.indexOf('=');
+                    String base = eq > 0 ? p.substring(0, eq).trim() : p.trim();
+                    String sub = eq > 0 ? p.substring(eq + 1).trim() : null;
+                    // bare token (no '='): base=name, sub=32-bit known from context? — expect pair form
+                    if (sub == null) sub = r.subs.getOrDefault(base, base);
+                    r.subs.put(base, sub);
+                    if (eq < 0) r.subs.put(sub, base);
+                }
+                pos[0]++; continue;
+            }
+            if (t.startsWith("fregs:")) { r.fregs = toks(t.substring(6)); pos[0]++; continue; }
+            if (t.startsWith("fargs:")) { r.fargs = toks(t.substring(6)); pos[0]++; continue; }
+            if (t.startsWith("fret:")) { r.fret = first(t.substring(5)); pos[0]++; continue; }
             if (t.startsWith("scratch:")) { pos[0]++; continue; }
             if (t.startsWith("ret:")) { r.ret = first(t.substring(4)); pos[0]++; continue; }
             if (t.startsWith("fallback:")) { r.fallback = first(t.substring(9)); pos[0]++; continue; }

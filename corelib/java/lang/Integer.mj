@@ -1,0 +1,55 @@
+// requires: P1 (long), P3 (objects, instanceof), P5 (NumberFormatException)
+package java.lang;
+
+public class Integer {
+    public static final int MIN_VALUE = -2147483648;
+    public static final int MAX_VALUE = 2147483647;
+
+    private int value;
+
+    public Integer(int v) { value = v; }
+
+    public int intValue() { return value; }
+
+    public boolean equals(Object o) {
+        return o instanceof Integer && ((Integer) o).value == value;
+    }
+
+    public int hashCode() { return value; }
+
+    public String toString() { return toString(value); }
+
+    public static Integer valueOf(int v) { return new Integer(v); }
+
+    public static String toString(int v) {
+        if (v == 0) return "0";
+        boolean neg = v < 0;
+        char[] buf = new char[11];
+        int i = 11;
+        int u = v;
+        while (u != 0) {
+            int m = u % 10;
+            buf[--i] = (char) ('0' - m);
+            u = u / 10;
+        }
+        if (neg) buf[--i] = '-';
+        return String.wrap(buf, 11 - i);
+    }
+
+    public static int parseInt(String s) {
+        // TODO(P5): throw NumberFormatException при невалиден вход
+        if (s == null || s.length() == 0) return 0;
+        int i = 0;
+        boolean neg = false;
+        char c = s.charAt(0);
+        if (c == '-' || c == '+') { neg = c == '-'; i = 1; }
+        long v = 0;
+        for (; i < s.length(); i++) {
+            int d = s.charAt(i) - '0';
+            if (d < 0 || d > 9) break;
+            v = v * 10 + d;
+        }
+        if (neg) v = -v;
+        return (int) v;
+    }
+}

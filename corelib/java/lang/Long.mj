@@ -1,0 +1,55 @@
+// requires: P1 (long, 1L/0x…L, SHR/USHR), P3 (objects, instanceof), P5 (NumberFormatException)
+package java.lang;
+
+public class Long {
+    public static final long MIN_VALUE = -9223372036854775808L;
+    public static final long MAX_VALUE = 9223372036854775807L;
+
+    private long value;
+
+    public Long(long v) { value = v; }
+
+    public long longValue() { return value; }
+
+    public boolean equals(Object o) {
+        return o instanceof Long && ((Long) o).value == value;
+    }
+
+    public int hashCode() { return (int) (value ^ (value >>> 32)); }
+
+    public String toString() { return toString(value); }
+
+    public static Long valueOf(long v) { return new Long(v); }
+
+    public static String toString(long v) {
+        if (v == 0) return "0";
+        boolean neg = v < 0;
+        char[] buf = new char[20];
+        int i = 20;
+        long u = v;
+        while (u != 0) {
+            long m = u % 10;
+            buf[--i] = (char) ('0' - m);
+            u = u / 10;
+        }
+        if (neg) buf[--i] = '-';
+        return String.wrap(buf, 20 - i);
+    }
+
+    public static long parseLong(String s) {
+        // TODO(P5): throw NumberFormatException при невалиден вход
+        if (s == null || s.length() == 0) return 0;
+        int i = 0;
+        boolean neg = false;
+        char c = s.charAt(0);
+        if (c == '-' || c == '+') { neg = c == '-'; i = 1; }
+        long v = 0;
+        for (; i < s.length(); i++) {
+            int d = s.charAt(i) - '0';
+            if (d < 0 || d > 9) break;
+            v = v * 10 + d;
+        }
+        if (neg) v = -v;
+        return v;
+    }
+}

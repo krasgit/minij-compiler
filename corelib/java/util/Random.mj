@@ -1,0 +1,48 @@
+// requires: P1 (long, 1L/0x…L literals, SHR/USHR, float/double), P3 (objects),
+//           P5 (throw IllegalArgumentException при bound<=0)
+package java.util;
+
+public class Random {
+    private static final long MASK = (1L << 48) - 1;
+    private static final long MULT = 0x5DEECE66DL;
+    private static final long ADD = 0xBL;
+
+    private long seed;
+
+    public Random(long initialSeed) { setSeed(initialSeed); }
+    public Random() { this(System.nanoTime()); }
+
+    public void setSeed(long s) { seed = (s ^ MULT) & MASK; }
+
+    private int next(int bits) {
+        seed = (seed * MULT + ADD) & MASK;
+        return (int) (seed >>> (48 - bits));
+    }
+
+    public int nextInt() { return next(32); }
+
+    public int nextInt(int bound) {
+        if (bound <= 0) { throw new IllegalArgumentException("bound must be positive"); }
+        int m = bound - 1;
+        if ((bound & m) == 0) {
+            return (int) ((bound * (long) next(31)) >> 31);
+        }
+        int u = next(31);
+        int r = u % bound;
+        while (u - r + m < 0) {
+            u = next(31);
+            r = u % bound;
+        }
+        return r;
+    }
+
+    public long nextLong() { return ((long) next(32) << 32) + next(32); }
+
+    public float nextFloat() { return next(24) / (float) (1 << 24); }
+
+    public double nextDouble() {
+        return (((long) next(26) << 27) + next(27)) * (1.0 / 9007199254740992.0);
+    }
+
+    public boolean nextBoolean() { return next(1) != 0; }
+}

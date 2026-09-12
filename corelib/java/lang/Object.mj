@@ -1,0 +1,25 @@
+// requires: P0 (native keyword контракт), P3 (objects, instanceof, class table),
+//           P7 (header monitor bits — object header резервира thin-lock/monitor слот от P3)
+package java.lang;
+
+public class Object {
+    public boolean equals(Object other) {
+        return this == other;
+    }
+
+    public int hashCode() {
+        return identityHashCode(this);
+    }
+
+    public String toString() {
+        return typeName(this) + "@" + Integer.toString(identityHashCode(this));
+    }
+
+    // P7: wait/notify/notifyAll идват с Thread/Concurrency фазата
+    // public final native void wait(long timeout) throws InterruptedException;
+    // public final native void notify();
+    // public final native void notifyAll();
+
+    static native String typeName(Object o);
+    static native int identityHashCode(Object o);
+}

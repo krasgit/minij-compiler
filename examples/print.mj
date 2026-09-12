@@ -1,0 +1,9 @@
+class Print {
+    static int main() {
+        puti(123);
+        puti(-7);
+        putc(65);
+        putc(10);
+        return 1;
+    }
+}

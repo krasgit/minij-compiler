@@ -1,0 +1,31 @@
+// requires: P1 (long), P2 (String/char[] през runtime I/O), P3 (objects)
+package java.lang;
+
+public class PrintStream {
+    private int fd;
+
+    private PrintStream(int fd) {
+        this.fd = fd;
+    }
+
+    public void print(int v)     { nativeWriteInt(fd, v); }
+    public void print(long v)    { nativeWriteLong(fd, v); }
+    public void print(boolean v) { nativeWriteBool(fd, v); }
+    public void print(char v)    { nativeWriteChar(fd, v); }
+    public void print(String v)  { nativeWriteStr(fd, v); }
+
+    public void println(int v)         { print(v); newline(); }
+    public void println(long v)        { print(v); newline(); }
+    public void println(boolean v)     { print(v); newline(); }
+    public void println(char v)        { print(v); newline(); }
+    public void println(String v)      { print(v); newline(); }
+    public void println()              { newline(); }
+
+    private void newline() { nativeWriteChar(fd, '\n'); }
+
+    static native void nativeWriteInt(int fd, int v);
+    static native void nativeWriteLong(int fd, long v);
+    static native void nativeWriteBool(int fd, boolean v);
+    static native void nativeWriteChar(int fd, int c);
+    static native void nativeWriteStr(int fd, String v);
+}

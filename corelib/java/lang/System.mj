@@ -1,0 +1,34 @@
+// requires: P2 (масиви + runtime I/O), P3 (static final инициализация, PrintStream)
+package java.lang;
+
+public class System {
+    public static final PrintStream out = new PrintStream(1);
+    public static final PrintStream err = new PrintStream(2);
+
+    public static void exit(int status) { nativeExit(status); }
+
+    public static void arraycopy(int[] src, int s0, int[] dst, int d0, int n) {
+        for (int i = 0; i < n; i++) dst[d0 + i] = src[s0 + i];
+    }
+
+    public static void arraycopy(char[] src, int s0, char[] dst, int d0, int n) {
+        for (int i = 0; i < n; i++) dst[d0 + i] = src[s0 + i];
+    }
+
+    public static void arraycopy(long[] src, int s0, long[] dst, int d0, int n) {
+        for (int i = 0; i < n; i++) dst[d0 + i] = src[s0 + i];
+    }
+
+    public static void arraycopy(boolean[] src, int s0, boolean[] dst, int d0, int n) {
+        for (int i = 0; i < n; i++) dst[d0 + i] = src[s0 + i];
+    }
+
+    public static void arraycopy(double[] src, int s0, double[] dst, int d0, int n) {
+        for (int i = 0; i < n; i++) dst[d0 + i] = src[s0 + i];
+    }
+
+    public static native long currentTimeMillis();
+    public static native long nanoTime();
+
+    static native void nativeExit(int status);
+}

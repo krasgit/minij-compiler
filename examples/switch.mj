@@ -1,0 +1,20 @@
+class SwitchTest {
+    static int f(int x) {
+        int r = 0;
+        switch (x) {
+            case 1: r = 10; break;
+            case 2: case 3: r = 20; break;
+            case 4: r = 40;
+            default: r = r + 1;
+        }
+        return r;
+    }
+    static int main() {
+        int a = f(1);
+        int b = f(2);
+        int c = f(3);
+        int d = f(4);
+        int e = f(5);
+        return a + b + c + d + e;
+    }
+}

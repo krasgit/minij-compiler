@@ -1,0 +1,140 @@
+// requires: P2 (char[] + bounds-check, runtime I/O), P3 (objects), P5 (indexOf/charAt сигнали -> throw)
+package java.lang;
+
+public class String {
+    private char[] data;
+    private int count;
+
+    private String(char[] data, int count) {
+        this.data = data;
+        this.count = count;
+    }
+
+    static String wrap(char[] data, int count) {
+        return new String(data, count);
+    }
+
+    public int length() { return count; }
+
+    public char charAt(int i) { return data[i]; }
+
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof String)) return false;
+        String s = (String) o;
+        if (count != s.count) return false;
+        for (int i = 0; i < count; i++)
+            if (data[i] != s.data[i]) return false;
+        return true;
+    }
+
+    public int compareTo(String s) {
+        int n = count < s.count ? count : s.count;
+        for (int i = 0; i < n; i++) {
+            int d = data[i] - s.data[i];
+            if (d != 0) return d;
+        }
+        return count - s.count;
+    }
+
+    public boolean isEmpty() { return count == 0; }
+
+    public String substring(int a, int b) {
+        char[] r = new char[b - a];
+        System.arraycopy(data, a, r, 0, b - a);
+        return new String(r, b - a);
+    }
+
+    public String concat(String s) {
+        char[] r = new char[count + s.count];
+        System.arraycopy(data, 0, r, 0, count);
+        System.arraycopy(s.data, 0, r, count, s.count);
+        return new String(r, count + s.count);
+    }
+
+    public boolean startsWith(String p) {
+        if (p.count > count) return false;
+        for (int i = 0; i < p.count; i++)
+            if (data[i] != p.data[i]) return false;
+        return true;
+    }
+
+    public boolean endsWith(String p) {
+        if (p.count > count) return false;
+        int off = count - p.count;
+        for (int i = 0; i < p.count; i++)
+            if (data[off + i] != p.data[i]) return false;
+        return true;
+    }
+
+    public boolean contains(String p) { return indexOf(p) >= 0; }
+
+    public int indexOf(int c) {
+        for (int i = 0; i < count; i++)
+            if (data[i] == c) return i;
+        return -1;
+    }
+
+    public int indexOf(String p) {
+        int limit = count - p.count;
+        for (int i = 0; i <= limit; i++) {
+            int j = 0;
+            while (j < p.count && data[i + j] == p.data[j]) j++;
+            if (j == p.count) return i;
+        }
+        return -1;
+    }
+
+    public char[] toCharArray() {
+        char[] r = new char[count];
+        System.arraycopy(data, 0, r, 0, count);
+        return r;
+    }
+
+    public String replace(char a, char b) {
+        char[] r = new char[count];
+        for (int i = 0; i < count; i++) {
+            char c = data[i];
+            r[i] = (c == a) ? b : c;
+        }
+        return new String(r, count);
+    }
+
+    public String trim() {
+        int a = 0, b = count;
+        while (a < b && data[a] <= ' ') a++;
+        while (b > a && data[b - 1] <= ' ') b--;
+        return substring(a, b);
+    }
+
+    public String toLowerCase() {
+        char[] r = new char[count];
+        for (int i = 0; i < count; i++) {
+            char c = data[i];
+            r[i] = (c >= 'A' && c <= 'Z') ? (char) (c + 32) : c;
+        }
+        return new String(r, count);
+    }
+
+    public String toUpperCase() {
+        char[] r = new char[count];
+        for (int i = 0; i < count; i++) {
+            char c = data[i];
+            r[i] = (c >= 'a' && c <= 'z') ? (char) (c - 32) : c;
+        }
+        return new String(r, count);
+    }
+
+    public static String valueOf(char[] arr) {
+        char[] r = new char[arr.length];
+        System.arraycopy(arr, 0, r, 0, arr.length);
+        return new String(r, arr.length);
+    }
+
+    public static String valueOf(char c)      { return new String(new char[] { c }, 1); }
+    public static String valueOf(boolean b)   { return b ? "true" : "false"; }
+    public static String valueOf(int v)       { return Integer.toString(v); }
+    public static String valueOf(long v)      { return Long.toString(v); }
+
+    public String toString() { return this; }
+}

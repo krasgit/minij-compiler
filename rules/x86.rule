@@ -1,7 +1,10 @@
-regs: %ebx %r12d %r13d %r14d %r15d
-args: %edi %esi %edx %ecx %r8d %r9d
-ret: %eax
-fallback: %eax
+regs: %rbx %r12 %r13 %r14 %r15
+args: %rdi %rsi %rdx %rcx %r8 %r9
+ret: %rax
+fallback: %rax
+
+# rule v2: 32-bit views of the 64-bit pool (used for i32 values)
+subs: %rbx=%ebx, %r12=%r12d, %r13=%r13d, %r14=%r14d, %r15=%r15d, %rdi=%edi, %rsi=%esi, %rdx=%edx, %rcx=%ecx, %r8=%r8d, %r9=%r9d, %rax=%eax
 
 prologue {
     pushq %rbp

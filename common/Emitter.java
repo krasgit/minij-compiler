@@ -28,8 +28,9 @@ public class Emitter {
 
     String reg(Ir.Value v) {
         String l = loc.get(v);
-        if (l != null && l.startsWith("reg ")) return l.substring(4);
-        return R.fallback != null ? R.fallback : (arch.equals("arm64") ? "w9" : "%eax");
+        if (l != null && l.startsWith("freg ")) return l.substring(5);   // FP pool
+        if (l != null && l.startsWith("reg ")) return R.width(l.substring(4), v.type);
+        return R.width(R.fallback != null ? R.fallback : (arch.equals("arm64") ? "w9" : "%eax"), v.type);
     }
 
     void line(Ir.Value v) {
@@ -165,7 +166,7 @@ public class Emitter {
                 return cx.v.name;
             case "ret":
                 if (R.ret == null) throw new RuntimeException("emit: 'ret:' missing in rule file");
-                return R.ret;
+                return R.width(R.ret, fn != null ? fn.retType : "i32");
             case "exit":  return exit();
             case "params": return params();
             case "args":
@@ -175,7 +176,11 @@ public class Emitter {
             case "argregs":
                 if (!idx) throw new RuntimeException("emit: ${argregs} must be used as ${argregs}[i]");
                 if (loopIdx < 0 || loopIdx >= R.args.size()) throw new RuntimeException("emit: ${argregs}[i] index out of range");
-                return R.args.get(loopIdx);
+                {
+                    Ir.Value av = (cx != null && loopIdx < cx.v.args.size()) ? cx.v.args.get(loopIdx) : null;
+                    String t = av != null ? av.type : "i32";
+                    return R.width(R.args.get(loopIdx), t);
+                }
             default:
                 if (cx != null && cx.bind.containsKey(name)) return valReg(cx.bind.get(name));
                 throw new RuntimeException("emit: unresolved placeholder '${" + name + "}'");
@@ -196,13 +201,26 @@ public class Emitter {
 
     String params() {
         StringBuilder b = new StringBuilder();
-        int n = Math.min(fn.params.size(), Math.min(R.regs.size(), R.args.size()));
         boolean arm = arch.equals("arm64");
-        for (int i = 0; i < n; i++) {
+        int ii = 0, fi = 0;
+        for (int n = 0; n < fn.params.size(); n++) {
+            String ptype = fn.params.get(n)[1];
+            boolean fp = R.isFpType(ptype);
+            String pool = fp
+                ? (fi < R.fregs.size() ? R.fregs.get(fi) : null)
+                : (ii < R.regs.size() ? R.regs.get(ii) : null);
+            String argreg = fp
+                ? (fi < R.fargs.size() ? R.fargs.get(fi) : null)
+                : (ii < R.args.size() ? R.args.get(ii) : null);
+            ii = fp ? ii : ii + 1;
+            fi = fp ? fi + 1 : fi;
+            if (pool == null || argreg == null) continue;
+            String home = R.width(pool, fp ? ptype : "i32");
+            String arg = R.width(argreg, fp ? ptype : "i32");
             if (b.length() > 0) b.append("\n");
             b.append("    ");
-            if (arm) b.append("mov ").append(R.regs.get(i)).append(", ").append(R.args.get(i));
-            else b.append("movl  ").append(R.args.get(i)).append(", ").append(R.regs.get(i));
+            if (arm) b.append("mov ").append(home).append(", ").append(arg);
+            else b.append("movl  ").append(arg).append(", ").append(home);
         }
         return b.toString();
     }

@@ -24,7 +24,7 @@ public class Ssa {
             Set<Ir.Block> has = new HashSet<>();
             while (!work.isEmpty()) {
                 Ir.Block b = work.poll();
-                for (Ir.Block d : dom.df.get(b)) if (has.add(d)) {
+                for (Ir.Block d : dom.df.getOrDefault(b, Collections.emptySet())) if (has.add(d)) {
                     Ir.Value phi = new Ir.Value("phi","i32");
                     phi.dbg = dbg.declNames.entrySet().stream().filter(x -> x.getValue().equals(name)).findFirst().map(Map.Entry::getKey).orElse(-1);
                     phiDefs.computeIfAbsent(d, k -> new LinkedHashMap<>()).put(name, phi);
