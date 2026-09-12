@@ -1,0 +1,38 @@
+class Str {
+    static int main() {
+        char[] a = "a\tb";
+        System.out.print(a);
+        System.out.println("[");
+        char[] b = "line1\nline2";
+        System.out.println(b);
+        System.out.println("done");
+        System.out.println(dash(5));
+        System.out.println(repeat('z', 3));
+        char n = '\n';
+        putc((int) n);
+        putc('=');
+        putc('\n');
+        puti('A');
+        return 0;
+    }
+
+    static char[] dash(int n) {
+        char[] r = new char[n];
+        int i = 0;
+        while (i < n) {
+            r[i] = '-';
+            i = i + 1;
+        }
+        return r;
+    }
+
+    static char[] repeat(char c, int n) {
+        char[] r = new char[n];
+        int i = 0;
+        while (i < n) {
+            r[i] = c;
+            i = i + 1;
+        }
+        return r;
+    }
+}

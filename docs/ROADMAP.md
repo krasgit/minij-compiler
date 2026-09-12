@@ -44,21 +44,25 @@
 - TLS-ready `mm_alloc` дизайн (per-thread allocator pointer — за P7 threads).
 - `java.lang` mini-core (System.out basics, lean String).
 
-> **Статус (P2 — първи примитивни 1-D масиви изпълнено):** layout 8-байтов header
+> **Статус (P2 — масиви + char[] String + System.out).** Масиви: layout 8-байтов header
 > (32-bit дължина, горните 32 бита 0 от bump arena) + data от +8. Frontend (AstLower):
 > `mapType("T[]")→ptr`, `varElem`/`elemOf` (int[]→i32, long[]→i64, double[]/float[]→f64),
 > `new T[n]`→`alloc_<el>`+`st_hdr`, `a.length` (AmbiguousName с n=2)→`load`+`len`,
 > `a[i]` read→`chk`+`lea_<el>`+`ld_<el>`, write→`chk`+`lea_<el>`+`st_<el>`. Нови ops
-> `alloc_i32/i64/f64`, `st_hdr`, `len`, `chk`, `lea_*`, `ld_*`, `st_*` minват безпроблемно
-> през SSA/canon/ssa-lower (ptr→i64-width). Bounds-check `chk` (arm `sxtw; ldr; cmp; b.ls
-> k_bounds_error` / x86 `movslq; movl; cmpq; jae`) → `sys_exit(134)`. Реralloc фикс:
-> void ops (chk/st_*) участват в last-use на аргументите си; PHI аргумент се брои за ползван
-> в края на predecessor-а; стойности дефинирани извън цикъл, но четени в него, се удължават
-> до края на цикъла (иначе linear scan преизползва жив регистър). `MOVSXT_i64` sign-extend
-> при int→long retype (вместо aliasing MOV_i64); ARM i32 consts през `movz/movk`
-> (`${imov}`) вместо единичен `mov` (покрива `1000000007`). Примери `arrays.mj`/`oob.mj`;
-> регресия **14/14 (arm64)**. Останало: `char[]` String, `System.out.*`, multi-D, GC seam
-> layout под 64-дума headers, TLS-ready allocator.
+> `alloc_i32/i64/f64`, `st_hdr`, `len`, `chk`, `lea_*`, `ld_*`, `st_*` минават безпроблемно
+> през SSA/canon/ssa-lower (ptr→i64-width). Bounds-check `chk` → `sys_exit(134)`.
+> Regalloc фиксове: void ops (chk/st_*) участват в last-use на аргументите си; PHI аргумент
+> се брои за ползван в края на predecessor-а; стойности дефинирани извън цикъл, но четени
+> в него, се удължават до края на цикъла. `MOVSXT_i64` sign-extend при int→long retype;
+> ARM i32 consts през `movz/movk` (`${imov}`). String/char: `String`=lean `char[]`
+> (header len + 4-byte cells, copy-by-reference), `char`=i32; StringLiteral/CharacterLiteral
+> от Janino са **суров текст с кавички и не-декодирани escapes** — `decodeString` сваля
+> кавичките и декодира (`\n \t \0 \" \\ \uXXXX`); литералът алокира свеж char[] (alloc+st_hdr+
+> unrolled lea/st). `System.out.print/println` → детекция по target `System/out` +
+> overload по първи аргумент (ptr→`k_print/k_println`, scalar→`k_print_i32/k_println_i32`,
+> `println()`→`k_newline`). Примери `arrays.mj`/`oob.mj`/`str.mj`/`str2.mj`;
+> регресия **16/16 (arm64)**, x86 textual emit OK. Останало: multi-D, GC seam layout,
+> TLS-ready allocator, `String.equals`/concat.
 
 ## P3 — Обекти
 - Symbol/type table, класове/полета/методи/overloads.

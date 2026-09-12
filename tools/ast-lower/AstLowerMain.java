@@ -71,6 +71,7 @@ public class AstLowerMain {
             case "long": return "i64";
             case "double": return "f64";
             case "float": return "f64";   // P1: преобладаване на float → double (запазва динамиката, документирано)
+            case "String": return "ptr";  // P2: lean String = char[]
             default: return "i32";
         }
     }
@@ -83,6 +84,47 @@ public class AstLowerMain {
         if (t.equals("ptr")) throw new RuntimeException("unsupported array element type: " + jt);
         return t;
     }
+    /** Елементен тип за регистрация на променлива/параметър от тип масив или String. */
+    static String elemOfDecl(String jt) {
+        if ("String".equals(jt)) return "i32";       // String = char[] → cells i32
+        if ("String[]".equals(jt)) return "i32";     // array-of-String: lean → всяка клетка държи ptr (i32-ширина)
+        return elemOf(jt);
+    }
+    /** Janino държи StringLiteral/CharacterLiteral.value като суров текст с кавички
+     *  и escapes; сваля кавичките и декодира escapes, за да получи реалните char-ове. */
+    static String decodeString(String raw, char q) {
+        if (raw.length() >= 2 && raw.charAt(0) == q && raw.charAt(raw.length() - 1) == q)
+            raw = raw.substring(1, raw.length() - 1);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c != '\\') { sb.append(c); continue; }
+            if (++i >= raw.length()) break;
+            char e = raw.charAt(i);
+            switch (e) {
+                case 'n': sb.append('\n'); break;
+                case 't': sb.append('\t'); break;
+                case 'r': sb.append('\r'); break;
+                case 'b': sb.append('\b'); break;
+                case 'f': sb.append('\f'); break;
+                case '0': sb.append('\0'); break;
+                case '\\': sb.append('\\'); break;
+                case '"': sb.append('"'); break;
+                case '\'': sb.append('\''); break;
+                case 'u': {
+                    int cp = 0, j = i + 1;
+                    while (j < raw.length() && j < i + 5 && Character.digit(raw.charAt(j), 16) >= 0)
+                        cp = cp * 16 + Character.digit(raw.charAt(j++), 16);
+                    sb.append((char) cp); i = j - 1;
+                    break;
+                }
+                default: sb.append(e); break;
+            }
+        }
+        return sb.toString();
+    }
+
+    static String decodeString(String raw) { return decodeString(raw, '"'); }
     /** Елементен тип на базата на индексен достъп (VariableDeclarator/param имена). */
     String elemOfRval(Java.Rvalue e) {
         if (e instanceof Java.AmbiguousName an) { String t = varElem.get(an.identifiers[0]); if (t != null) return t; }
@@ -118,6 +160,7 @@ public class AstLowerMain {
         if (e instanceof Java.IntegerLiteral lit)
             return (lit.value.endsWith("L") || lit.value.endsWith("l")) ? "i64" : "i32";
         if (e instanceof Java.BooleanLiteral) return "i32";
+        if (e instanceof Java.StringLiteral) return "ptr";
         if (e instanceof Java.FloatingPointLiteral) return "f64";
         if (e instanceof Java.AmbiguousName an) {
             String s = m.varType.get(an.identifiers[0]);
@@ -143,7 +186,6 @@ public class AstLowerMain {
         for (Object mo : methods) {
             if (!(mo instanceof Java.MethodDeclarator md)) continue;
             methodRet.put(md.name, mapType(getStr(md, "type")));
-            if (getStr(md,"type") != null && !getStr(md,"type").isEmpty()) System.err.println("#dbg md=" + md.name + " type=" + getStr(md,"type") + " native=" + md.isNative());
             if (md.isNative()) {
                 int ar = (md.formalParameters != null && md.formalParameters.parameters != null)
                         ? md.formalParameters.parameters.length : 0;
@@ -164,7 +206,7 @@ public class AstLowerMain {
         for (Object p : m.formalParameters.parameters) {
             if (!(p instanceof Java.FunctionDeclarator.FormalParameter fp)) continue;
             String pt = mapType(getStr(fp, "type"));
-            if (pt.equals("ptr")) varElem.put(fp.name, elemOf(getStr(fp, "type")));
+            if (pt.equals("ptr")) varElem.put(fp.name, elemOfDecl(getStr(fp, "type")));
             f.params.add(new String[]{fp.name, pt});
         }
         Ir.Block e = new Ir.Block("entry"); cur = e; f.blocks.add(e);
@@ -187,7 +229,7 @@ public class AstLowerMain {
         if (s instanceof Java.LocalVariableDeclarationStatement d) {
             for (Java.VariableDeclarator vd : d.variableDeclarators) {
                 String dt = mapType(getStr(d, "type"));
-                if (dt.equals("ptr")) varElem.put(vd.name, elemOf(getStr(d, "type")));
+                if (dt.equals("ptr")) varElem.put(vd.name, elemOfDecl(getStr(d, "type")));
                 Ir.Value a = emit("alloca", dt); a.dbg = tag(s);
                 allocaOf.put(vd.name, a); varType.put(vd.name, dt);
                 prog.debug.declNames.put(a.dbg, vd.name);
@@ -360,6 +402,27 @@ if (e == null) return konst(0, "i32", -1);
         if (e instanceof Java.FloatingPointLiteral lit)
             return konst(Double.doubleToRawLongBits(Double.parseDouble(String.valueOf(get(lit, "value")))), "f64", tag(e));
         if (e instanceof Java.BooleanLiteral lit) return konst(lit.value.equals("true")?1:0, "i32", tag(e));
+        if (e instanceof Java.CharacterLiteral cl) {
+            Object cv = get(cl, "value");
+            String cvs = cv == null ? "" : cv.toString();
+            String dec = decodeString(cvs, '\'');
+            long c = dec.isEmpty() ? 0 : (long) dec.charAt(0);
+            return konst(c, "i32", tag(e));
+        }
+        if (e instanceof Java.StringLiteral sl) {
+            Object sv = get(sl, "value");
+            String sval = decodeString(sv == null ? "" : sv.toString());
+            Ir.Value c = konst(sval.length(), "i32", tag(e));
+            Ir.Value a = emit("alloc_i32", "ptr", c); a.dbg = tag(e);
+            Ir.Value h = emit("st_hdr", "void", a, c); h.dbg = tag(e);
+            for (int k = 0; k < sval.length(); k++) {
+                Ir.Value ik = konst(k, "i32", tag(e));
+                Ir.Value ad = emit("lea_i32", "ptr", a, ik); ad.dbg = tag(e);
+                Ir.Value ch = konst(sval.charAt(k), "i32", tag(e));
+                Ir.Value st = emit("st_i32", "void", ad, ch); st.dbg = tag(e);
+            }
+            return a;
+        }
         if (e instanceof Java.AmbiguousName an) {
             if (an.identifiers.length > 1) {
                 if (!an.identifiers[1].equals("length"))
@@ -439,10 +502,30 @@ if (e == null) return konst(0, "i32", -1);
             return l;
         }
         if (e instanceof Java.MethodInvocation mi) {
+            // System.out.println / System.out.print → runtime char[]/i32 print helpers (P2)
+            Java.Rvalue tgt = (Java.Rvalue) get(mi, "target");
+            boolean sysout = false;
+            if (tgt instanceof Java.AmbiguousName tan) {
+                Object[] idsO = (Object[]) get(tan, "identifiers");
+                String[] ids = idsO == null ? null : Arrays.stream(idsO).map(String::valueOf).toArray(String[]::new);
+                sysout = ids != null && ids.length >= 2 && ids[0].equals("System") && ids[1].equals("out");
+            }
             List<Ir.Value> args = new ArrayList<>();
             for (Java.Rvalue a : mi.arguments) if (a != null) args.add(expr(a));
+            if (sysout) {
+                String nm;
+                if (mi.methodName.equals("println") && mi.arguments.length == 0) nm = "k_newline";
+                else if (mi.methodName.equals("println"))
+                    nm = inferType((Java.Rvalue) mi.arguments[0], this).equals("ptr") ? "k_println" : "k_println_i32";
+                else if (mi.methodName.equals("print"))
+                    nm = inferType((Java.Rvalue) mi.arguments[0], this).equals("ptr") ? "k_print" : "k_print_i32";
+                else throw new RuntimeException("unsupported System.out method: " + mi.methodName);
+                Ir.Value call = emit("call","i32"); call.name = nm;
+                call.args.addAll(args);
+                call.dbg = tag(mi);
+                return call;
+            }
             String rt = methodRet.getOrDefault(mi.methodName, "i32");
-            if (true) System.err.println("#dbg call " + mi.methodName + " -> rt=" + rt + " mangle=" + nativeMangle.getOrDefault(mi.methodName, "-"));
             if (rt.equals("void")) rt = "i32";
             Ir.Value call = emit("call", rt);
             call.name = nativeMangle.getOrDefault(mi.methodName, mi.methodName);

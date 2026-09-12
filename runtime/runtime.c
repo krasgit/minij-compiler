@@ -70,6 +70,24 @@ void puts(int p) {
     while (s != NULL && *s != 0) out_char(*s++);
 }
 
+/* ── String printing (P2): MiniJ String = char[] (header i32 length + 4-byte cells).
+ * System.out.println/print in .mj lower to k_println/k_print (char[]),
+ * k_println_i32/k_print_i32 (scalar) or k_newline (println()). ────────────── */
+
+static void print_chars(const void *a) {
+    if (a == NULL) return;
+    int n = *(const int *) a;
+    if (n <= 0) return;
+    const int *p = (const int *) ((const char *) a + 8);
+    for (int i = 0; i < n; i++) out_char(p[i]);
+}
+
+void k_print(void *a) { print_chars(a); }
+void k_println(void *a) { print_chars(a); out_char('\n'); }
+void k_print_i32(int v) { if (v < 0) { out_char('-'); out_digits((unsigned int)(-(long)v)); } else out_digits((unsigned int)v); }
+void k_println_i32(int v) { k_print_i32(v); out_char('\n'); }
+void k_newline(void) { out_char('\n'); }
+
 /* ── allocation seam (GC-agnostic, P2+) ─────────────────────────────────── */
 
 #define MM_ALIGN 16u

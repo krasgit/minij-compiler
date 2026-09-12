@@ -1,0 +1,21 @@
+class Str {
+    static int main() {
+        char[] s = "hello";
+        System.out.println(s);
+        System.out.println("world");
+        System.out.print("A->");
+        System.out.println(s[1]);
+        puti(s.length);
+        s[1] = 'X';
+        System.out.println(s);
+        char[] t = new char[5];
+        int i = 0;
+        while (i < 5) {
+            t[i] = (char) ('a' + i);
+            i = i + 1;
+        }
+        System.out.println(t);
+        System.out.println();
+        return 0;
+    }
+}
