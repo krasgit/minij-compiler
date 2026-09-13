@@ -76,6 +76,17 @@
 > Това поправя латентен бъг: преди spill-нати стойности тихо ползваха скретч `w9` и се
 > трошеха. Регресия **17/17 (arm64)**. Останало в P2: GC seam layout, TLS-ready allocator,
 > `String.equals`/concat.
+>
+> **Статус (P2 — String methods equals/concat).** `s.equals(t)` → `k_string_equals`
+> (сравнява header len + клетки, връща 1/0), `s.concat(t)` → `k_string_concat` (нов
+> char[] с len1+len2, копира двете). Frontend детектира `MethodInvocation` с target
+> `AmbigName[recv, м]` (receiver-стойността = `load` от alloca-та на `recv`, метод е
+> ids[1]) или `StringLiteral` (иначе `expr(target)`); аргументите се lower-ват ПРЕДИ
+> call-emit (иначе инструкциите падат след call-а → garbage в x0/x1). `javaTypeOf`/
+> `inferType` разпознават `concat`→`"String"` (така `println(s.concat(..))` отива в
+> `k_println`), а `AmbigName[s,length]` вали **int** — само `identifiers[1]=="length"`
+> дава int, иначе връща типа на receiver-а (за да не счупи String dispatch-а).
+> Пример `str3.mj`; регресия **18/18 (arm64)**; x86 textual emit OK.
 
 ## P3 — Обекти
 - Symbol/type table, класове/полета/методи/overloads.

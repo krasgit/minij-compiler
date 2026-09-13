@@ -95,7 +95,10 @@ public class AstLowerMain {
     String javaTypeOf(Java.Rvalue e) {
         if (e == null) return "int";
         if (e instanceof Java.ParenthesizedExpression pe) return javaTypeOf((Java.Rvalue) pe.value);
-        if (e instanceof Java.AmbiguousName an) { String t = varJType.get(an.identifiers[0]); return t == null ? "int" : t; }
+        if (e instanceof Java.AmbiguousName an) {
+            if (an.identifiers.length > 1 && an.identifiers[1].equals("length")) return "int";  // x.length
+            String t = varJType.get(an.identifiers[0]); return t == null ? "int" : t;
+        }
         if (e instanceof Java.ArrayAccessExpression aa) {
             String b = javaTypeOf(aa.lhs);
             return b != null && b.endsWith("[]") ? b.substring(0, b.length() - 2) : "int";
@@ -110,7 +113,10 @@ public class AstLowerMain {
         if (e instanceof Java.BinaryOperation b)
             return wideJ(javaTypeOf((Java.Rvalue) b.lhs), javaTypeOf((Java.Rvalue) b.rhs));
         if (e instanceof Java.UnaryOperation u) return u.operator.equals("!") ? "boolean" : javaTypeOf(u.operand);
-        if (e instanceof Java.MethodInvocation mi) { String r = methodRetJt.get(mi.methodName); return r == null ? "int" : r; }
+        if (e instanceof Java.MethodInvocation mi) {
+            if (mi.methodName.equals("concat")) return "String";
+            String r = methodRetJt.get(mi.methodName); return r == null ? "int" : r;
+        }
         if (e instanceof Java.FieldAccessExpression fa) { Object lh = get(fa, "lhs"); return lh instanceof Java.Rvalue lv ? javaTypeOf(lv) : "int"; }
         return "int";
     }
@@ -187,6 +193,7 @@ public class AstLowerMain {
         if (e instanceof Java.StringLiteral) return "ptr";
         if (e instanceof Java.FloatingPointLiteral) return "f64";
         if (e instanceof Java.AmbiguousName an) {
+            if (an.identifiers.length > 1) return "i32";  // x.length
             String s = m.varType.get(an.identifiers[0]);
             return s == null ? "i32" : s;
         }
@@ -200,6 +207,8 @@ public class AstLowerMain {
         if (e instanceof Java.UnaryOperation u)
             return u.operator.equals("!") ? "i32" : inferType(u.operand, m);
         if (e instanceof Java.MethodInvocation mi) {
+            if (mi.methodName.equals("concat")) return "ptr";
+            if (mi.methodName.equals("equals")) return "i32";
             String r = m.methodRet.get(mi.methodName);
             return r == null ? "i32" : r;
         }
@@ -450,6 +459,21 @@ public class AstLowerMain {
         return a;
     }
 
+    /** String-метод receiver: `s.equals(t)` идва като AmbiguousName [s, equals]
+     *  (expr() не го обхожда — методите са ids[1]); сваляме само стойността на
+     *  променливата. Други receiver-и (литерали, извиквания) → expr(). */
+    Ir.Value recvValue(Java.MethodInvocation mi, Java.Rvalue tgt) {
+        if (tgt instanceof Java.AmbiguousName an && an.identifiers.length == 2
+                && an.identifiers[1].equals(mi.methodName)) {
+            String n = an.identifiers[0];
+            Ir.Value al = allocaOf.get(n);
+            if (al == null) throw new RuntimeException("undefined: " + n);
+            Ir.Value l = emit("load", al.type, al); l.dbg = tag(tgt);
+            return l;
+        }
+        return expr(tgt);
+    }
+
     Ir.Value expr(Java.Rvalue e) {
 if (e == null) return konst(0, "i32", -1);
         if (e instanceof Java.ParenthesizedExpression pe) return expr(pe.value);
@@ -576,8 +600,22 @@ if (e == null) return konst(0, "i32", -1);
             return l;
         }
         if (e instanceof Java.MethodInvocation mi) {
-            // System.out.println / System.out.print → runtime char[]/i32 print helpers (P2)
             Java.Rvalue tgt = (Java.Rvalue) get(mi, "target");
+            // String methods (P2 tail): s.equals(t) / s.concat(t) → runtime helpers
+            if (tgt != null && (mi.methodName.equals("equals") || mi.methodName.equals("concat"))
+                    && javaTypeOf(tgt).equals("String")) {
+                if (mi.arguments.length != 1)
+                    throw new RuntimeException("String." + mi.methodName + ": expected 1 argument, got " + mi.arguments.length);
+                List<Ir.Value> sargs = new ArrayList<>();
+                sargs.add(recvValue(mi, tgt));
+                sargs.add(expr(mi.arguments[0]));
+                boolean isConcat = mi.methodName.equals("concat");
+                Ir.Value call = emit("call", isConcat ? "ptr" : "i32");
+                call.name = isConcat ? "k_string_concat" : "k_string_equals";
+                call.args.addAll(sargs);
+                call.dbg = tag(mi);
+                return call;
+            }
             boolean sysout = false;
             if (tgt instanceof Java.AmbiguousName tan) {
                 Object[] idsO = (Object[]) get(tan, "identifiers");

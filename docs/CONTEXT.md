@@ -43,31 +43,35 @@ regression + docs + commit + push.
 - Commit стил: `git add -A` + един ред message („P2 …: …; N/N regression").
 - Commit history: `8873729` P0 → `318c431` P1 types → `60f704e` P1 native →
   `824824d` P2 arrays → `b5f2736` P2 String/char/System.out →
-  **`e89d6f4` P2 multi-D arrays + stack spill (HEAD, pushed)**.
+  `e89d6f4` P2 multi-D arrays + stack spill → `a094239` docs/CONTEXT.md;
+  плюс следващия за P2 String.equals/concat (виж Status).
 
-## Status (актуално към HEAD = e89d6f4)
+## Status (актуално към HEAD = a094239, свой сет: P2 String.equals/concat)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
-  **P2 multi-D arrays (17/17 regression, pushed)**.
-- ACTIVE: нищо — последният милстон (multi-D + spill fix) е приключен и push-нат.
-- Regression: **17/17 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
-  dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc).
+  **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
+  (18/18 regression — str3.mj)**.
+- ACTIVE: P2 напълно приключен (освен GC seam layout / TLS-ready allocator, всичко е done).
+  Следваща стъпка = по-долу в NEXT MOVE.
+- Regression: **18/18 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+  dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
+  **str3** (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`).
 
 ## NEXT MOVE (при "continue")
 
-Кандидати за следващ „go" (по roadmap ред; P2 остатък е малък):
-1. **`String.equals`/concat (P2 tail)** — най-малък, идеален за един милстон: `s.equals(t)`,
-   `s.concat(t)`/`s + s`? (провери как Janino държи String binary op — `+`).
-2. **P3 Objects** — голямата следваща фаза: symbol/type table, класове/полета/методи/overloads;
+P2 String.equals/concat е **завършен** → следващият кандидат по roadmap:
+1. **P3 Objects** — голямата следваща фаза: symbol/type table, класове/полета/методи/overloads;
    object header дума (class index + monitor/bias bits + GC bits); `new`, поле достъп,
    virtual calls/`call` overload с обекти, `instanceof`/cast. Свалено от ROADMAP: N+1 hit —
    методите на обекти ще изискват `dispatch` (class index → vtable), което ще усложни
    Regalloc/Emitter.
+2. (останало в P2) **GC seam layout / TLS-ready allocator** — `mm_alloc` kind аргументът и
+   header-думата за обектите се решават заедно с P3.
 
 Първа стъпка преди кода: ~10-минутно проучване на Janino AST за избрания feature (SPIA или
-продължи модела с probe файлове в `/tmp/opencode`, примерно `SProbe.java`), после frontend,
+продължи модела с probe файлове в `/tmp/opencode`), после frontend,
 rules ако има нови ops, пример (`examples/*.mj`), добавяне в `run_tests.sh`, bumper на
-елементите, README/ROADMAP, комит+push.
+елементите, README/ROADMAP/CONTEXT, комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
 
@@ -83,6 +87,17 @@ rules ако има нови ops, пример (`examples/*.mj`), добавян
 - `System.out.println/print` dispatch: target `AmbiguousName [System,out,…]`; overload по тип на
   първия аргумент: ptr → `k_print/k_println`, i32 → `k_print_i32/k_println_i32`,
   `println()` (0 args) → `k_newline`.
+- **String методи (P2 str3)**: `s.equals("a")` → `MethodInvocation(methodName, arguments,
+  target=AmbigName [s, equals])` — методът е **последният identifier** (ids[1]), receiver
+  `s`=ids[0]; `"x".concat(s)` → target=`StringLiteral`. Frontend детекция: `javaTypeOf(tgt)`
+  ==`"String"` && methodName в {equals,concat} && 1 arg → `call k_string_equals`/`k_string_concat`
+  с args=[recv, arg0]; receiver стойността за AmbigName[recv,метод] = `load` от alloca-та на ids[0]
+  (иначе `expr(tgt)`); **аргументите трябва да се lower-ват ПРЕДИ emit("call")** — иначе
+  arg-инструкциите падат след call-а и x0/x1 получават garbage от scratch-регистрите.
+- `javaTypeOf`/`inferType` за MethodInvocation: `concat`→`"String"`/`"ptr"` (иначе println
+  ще вземе `k_println_i32`); `equals`→`"int"`/`"i32"`. `AmbigName` с >1 ids: само
+  `identifiers[1]=="length"` дава int; всяко друго връща типа на receiver-а (`s.equals` се
+  типизира като "String") — пълният `length>1 → int` чупи String dispatch-а.
 
 ### Типове / layout
 - `String` = lean `char[]` (i32 header + 4-byte cells, copy-by-reference); `mapType("String")→"ptr"`;
@@ -131,10 +146,10 @@ rules ако има нови ops, пример (`examples/*.mj`), добавян
 
 ## Testing
 
-- `cd /tmp/opencode && bash run_tests.sh` → build + 17 теста; текущ резултат **17/17**.
+- `cd /tmp/opencode && bash run_tests.sh` → build + 18 теста; текущ резултат **18/18**.
 - Тест функции: `run name src exitcode`, `run_out name src exitcode $'expected\nout\n'`;
-  добавяне на нов пример = `run_out md "$DIR/examples/md.mj" 0 "3\n4\n…"` + обновяват се 16/16→17/17
-  и README/ROADMAP.
+  добавяне на нов пример = `run_out str3 "$DIR/examples/str3.mj" 0 $'1\n0\n0\n7\nabcdef\n6\n6\nxabc\nabcABcd\n1\n'`
+  + обновяват се броя и README/ROADMAP/CONTEXT.
 - Примерни файлове за multi-D: `examples/md.mj`. OOB multi-D (m7/m8 .mj в /tmp/opencode) → exit 134.
 - Отделни минимални програми за бисouter (m1..m8.mj) стоят в /tmp/opencode; не се комитват.
 
@@ -149,9 +164,10 @@ rules ако има нови ops, пример (`examples/*.mj`), добавян
 - `common/RuleParser.java` — rule v2 parser (Rules.width/isFpType).
 - `rules/arm.rule`, `rules/x86.rule` — include `alloc_i32/i64/f64/ptr`, `st_hdr`, `len`, `chk`,
   `lea_i32/i64/f64/ptr`, `ld_i32/i64/f64/ptr`, `st_i32/i64/f64/ptr`, CONST/MOV/ADD/…, prologue/epilogue.
-- `runtime/runtime.c`, `runtime/crt0.S` — k_* helpers, mm_alloc, syscalls.
+- `runtime/runtime.c`, `runtime/crt0.S` — k_* helpers (`k_print/k_println`, `k_print_i32/
+  k_println_i32`, `k_newline`, **`k_string_equals`/`k_string_concat`**), mm_alloc, syscalls.
 - `examples/*.mj` — hello, gcd, fib, forloop, dowhile, ternary, switch, print, dbl, lng, mix,
-  arrays, oob, str, str2, **md**, native.
+  arrays, oob, str, str2, md, **str3**, native.
 - `/tmp/opencode/run_tests.sh` — regression harness.
 - `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD) — Janino AST probes, преизползваеми.
 - `README.md`, `docs/ROADMAP.md`, `docs/ir-format.md`, `docs/rule-format.md`, `docs/corelib.md`.

@@ -88,6 +88,38 @@ void k_print_i32(int v) { if (v < 0) { out_char('-'); out_digits((unsigned int)(
 void k_println_i32(int v) { k_print_i32(v); out_char('\n'); }
 void k_newline(void) { out_char('\n'); }
 
+/* ── String methods (P2 tail): s.equals(t) / s.concat(t) → k_string_*
+ * equals: compare two char[] (header len + i32 cells). ──────────────────── */
+void *mm_alloc(unsigned long size, int kind);
+
+int k_string_equals(const void *a, const void *b) {
+    if (a == b) return 1;
+    if (a == NULL || b == NULL) return 0;
+    int na = *(const int *) a;
+    int nb = *(const int *) b;
+    if (na != nb) return 0;
+    const int *pa = (const int *) ((const char *) a + 8);
+    const int *pb = (const int *) ((const char *) b + 8);
+    for (int i = 0; i < na; i++) if (pa[i] != pb[i]) return 0;
+    return 1;
+}
+
+/* concat: new char[] with len1+len2 cells, copy both (alloc_i32 shape (n+2)
+ * words; data at +8). */
+void *k_string_concat(const void *a, const void *b) {
+    int na = a == NULL ? 0 : *(const int *) a;
+    int nb = b == NULL ? 0 : *(const int *) b;
+    int n = na + nb;
+    char *dst = (char *) mm_alloc((unsigned long) (n + 2) * 4u, 0);
+    *(int *) dst = n;
+    int *pd = (int *) (dst + 8);
+    const int *pa = (const int *) ((const char *) a + 8);
+    const int *pb = (const int *) ((const char *) b + 8);
+    for (int i = 0; i < na; i++) pd[i] = pa[i];
+    for (int i = 0; i < nb; i++) pd[na + i] = pb[i];
+    return dst;
+}
+
 /* ── allocation seam (GC-agnostic, P2+) ─────────────────────────────────── */
 
 #define MM_ALIGN 16u

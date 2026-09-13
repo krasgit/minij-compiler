@@ -1,0 +1,19 @@
+class T {
+    static int main() {
+        String s = "abc";
+        puti(s.equals("abc") ? 1 : 0);
+        puti(s.equals("abd") ? 1 : 0);
+        puti(s.equals("abcd") ? 1 : 0);
+        puti(s.equals("abc") ? 7 : 0);
+        String c = s.concat("def");
+        System.out.println(c);
+        System.out.println(c.length);
+        System.out.println(s.concat(s).length);
+        String lit = "x".concat(s);
+        System.out.println(lit);
+        String chained = s.concat("AB").concat("cd");
+        System.out.println(chained);
+        System.out.println(s.concat("").equals("abc") ? 1 : 0);
+        return 0;
+    }
+}
