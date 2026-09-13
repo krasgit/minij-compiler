@@ -93,11 +93,12 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **18/18 теста на arm64**
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **19/19 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
-str3 `1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1` (String equals/concat); всеки — exit code + stdout чек).
+str3 `1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1` (String equals/concat),
+obj `5/7/6/12`, `1/2/3/1`, exit 2 (P3 classes); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -123,6 +124,16 @@ Multi-D = масив от масиви: клетките на външния м�
 Regalloc вече поддържа **stack spill** (стойности с `stack -N` location се reload-ват в
 скретч `w/x/d11..13` на arm; слага се `sub sp` пропорционално на функцията), което е и истинска
 поправка на латентен бъг — преди spill-нати стойности тихо падаха в скретч `w9` и се трошеха.
+
+### Обекти / класове (P3, първа част)
+
+Обект = 8-byte header (class index + pad/GC bits, записва се с `st_hdr`) + instance-полета от +8,
+aligned по тип (i32→4, i64/f64/ptr→8), total size в `classSizes`. `new Foo()` (Janino
+`NewClassInstance`, 0-арг ctor) → `alloc_obj size` + `st_hdr classIndex`. Достъп `f.x` / `f.x = v`
+(Janino `AmbiguousName[f, x]`) → `load` на base, `lea_field offset` (преходи през prefix-полета с
+`ld_ptr` за дълги вериги като `h.next.next.v`) и `ld_<ft>`/`st_<ft>`. `Foo[]` — `elemOf` дава
+`ptr` клетки. Layout-ът се смята в `collectClass` (pre-pass преди lowering), така че класовете се
+позовават свободно и напред. Методи/виртуални dispatch-и — следващата P3 част. Пример `examples/obj.mj`.
 
 ## Пътна карта
 

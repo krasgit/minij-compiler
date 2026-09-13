@@ -364,6 +364,13 @@ emit alloc_ptr(c) {
     callq mm_alloc
     movq %rax, $dst
 }
+emit alloc_obj(c) {
+    movslq ${c}, %r10
+    movq %r10, %rdi
+    xorl %esi, %esi
+    callq mm_alloc
+    movq %rax, $dst
+}
 emit st_hdr(a, c) {
     movl ${c}, (${a})
 }
@@ -399,6 +406,10 @@ emit lea_ptr(a, i) {
     shlq $3, %r10
     addq ${a}, %r10
     leaq 8(%r10), $dst
+}
+emit lea_field(a, o) {
+    movq ${a}, $dst
+    addq ${o}, $dst
 }
 emit ld_i32(a) {
     movl (${a}), $dst

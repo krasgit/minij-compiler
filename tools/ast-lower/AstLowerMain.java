@@ -14,6 +14,9 @@ public class AstLowerMain {
     Map<String, String> methodRet = new LinkedHashMap<>();
     Map<String, String> methodRetJt = new LinkedHashMap<>();
     Map<String, String> nativeMangle = new LinkedHashMap<>();
+    Map<String, Integer> classIndex = new LinkedHashMap<>();      // className → малко int (в header-а)
+    Map<String, Integer> classSizes = new LinkedHashMap<>();      // className → общ byte size с header
+    Map<String, Map<String, Object[]>> classFields = new LinkedHashMap<>(); // className → field → {irType, byteOffset, javaType}
     Deque<Ir.Block> breaks = new ArrayDeque<>(), conts = new ArrayDeque<>();
     int dbgSeq = 1;
 
@@ -27,6 +30,9 @@ public class AstLowerMain {
         m.prog = new Ir.Program(); m.prog.module = base;
         List<?> types = (List<?>) get(cu, "packageMemberTypeDeclarations");
         if (types == null) types = (List<?>) get(cu, "types");
+        if (types != null) for (Object td : types) {
+            if (td instanceof Java.ClassDeclaration cd) m.collectClass(cd);
+        }
         if (types != null) for (Object td : types) {
             if (td instanceof Java.ClassDeclaration cd) m.cls(cd);
         }
@@ -76,18 +82,61 @@ public class AstLowerMain {
             default: return "i32";
         }
     }
+    /** Java тип на обект-клас → IR ptr; останалото − по mapType. */
+    String irType(String jt) {
+        if (jt != null && classIndex.containsKey(jt)) return "ptr";
+        return mapType(jt);
+    }
+
+    /** Pre-pass преди lowering: layout на instance-полетата на всеки клас.
+     *  Object = 8-byte header (class index + pad/GC bits), полетата от +8,
+     *  aligned по тип (i32→4, i64/f64/ptr→8). */
+    void collectClass(Java.ClassDeclaration cd) {
+        String cn = getStr(cd, "name");
+        if (cn == null || classIndex.containsKey(cn)) return;
+        int idx = classIndex.size();
+        classIndex.put(cn, idx);
+        int off = 8;
+        Map<String, Object[]> fs = new LinkedHashMap<>();
+        Object members = invoke0(cd, "getVariableDeclaratorsAndInitializers");
+        if (members instanceof List<?> ml) for (Object mb : ml) {
+            if (!(mb instanceof Java.FieldDeclarationOrInitializer)) continue;
+            String jt = getStr(mb, "type");
+            if (jt == null) continue;
+            String ft = irType(jt);
+            int a = ft.equals("i32") ? 4 : 8;
+            Object vds = get(mb, "variableDeclarators");
+            if (vds instanceof Object[] arr) for (Object vd : arr) {
+                String name = getStr(vd, "name");
+                off = (off + a - 1) & ~(a - 1);
+                fs.put(name, new Object[]{ ft, off, jt });
+                off += a;
+            }
+        }
+        classSizes.put(cn, Math.max(16, (off + 7) & ~7));
+        classFields.put(cn, fs);
+    }
+
+    static Object invoke0(Object o, String method) {
+        for (Class<?> c = o.getClass(); c != null; c = c.getSuperclass()) {
+            try { Method mm = c.getDeclaredMethod(method); mm.setAccessible(true); return mm.invoke(o); }
+            catch (Throwable t) { }
+        }
+        return null;
+    }
+
     /** Елементен тип на 1-D примитивен масив от Java-типа "int[]"/"long[]"/"double[]".
      *  Многомерен ("int[][]", "int[][][]", …) и "String[]" дават "ptr" (клетките пазят указатели). */
-    static String elemOf(String jt) {
+    String elemOf(String jt) {
         if (jt == null || !jt.endsWith("[]")) return null;
         String c = jt.substring(0, jt.length() - 2);
-        if (c.endsWith("[]") || c.equals("String")) return "ptr";
+        if (c.endsWith("[]") || c.equals("String") || classIndex.containsKey(c)) return "ptr";
         String t = mapType(c);
         if (t.equals("ptr")) throw new RuntimeException("unsupported array element type: " + jt);
         return t;
     }
     /** Тип на клетките при индексиран достъп (String се третира като char[]). */
-    static String elemOfAccess(String jt) {
+    String elemOfAccess(String jt) {
         if ("String".equals(jt)) return "i32";
         return elemOf(jt);
     }
@@ -102,6 +151,10 @@ public class AstLowerMain {
         if (e instanceof Java.ArrayAccessExpression aa) {
             String b = javaTypeOf(aa.lhs);
             return b != null && b.endsWith("[]") ? b.substring(0, b.length() - 2) : "int";
+        }
+        if (e instanceof Java.NewClassInstance nci) {
+            Object t = get(nci, "type");
+            return t == null ? "int" : t.toString();
         }
         if (e instanceof Java.Cast c) { String t = getStr(c, "targetType"); return t == null ? "int" : t; }
         if (e instanceof Java.BooleanLiteral) return "boolean";
@@ -198,12 +251,13 @@ public class AstLowerMain {
             return s == null ? "i32" : s;
         }
         if (e instanceof Java.ArrayAccessExpression aa) {
-            String el = elemOfAccess(m.javaTypeOf(aa.lhs));
+            String el = m.elemOfAccess(m.javaTypeOf(aa.lhs));
             return el == null ? "i32" : el;
         }
         if (e instanceof Java.BinaryOperation b)
             return wide(inferType((Java.Rvalue) b.lhs, m), inferType((Java.Rvalue) b.rhs, m));
         if (e instanceof Java.Cast c) return mapType(getStr(c, "targetType"));
+        if (e instanceof Java.NewClassInstance nci) return "ptr";
         if (e instanceof Java.UnaryOperation u)
             return u.operator.equals("!") ? "i32" : inferType(u.operand, m);
         if (e instanceof Java.MethodInvocation mi) {
@@ -222,7 +276,7 @@ public class AstLowerMain {
         if (cn == null) cn = "T";
         for (Object mo : methods) {
             if (!(mo instanceof Java.MethodDeclarator md)) continue;
-            methodRet.put(md.name, mapType(getStr(md, "type")));
+            methodRet.put(md.name, irType(getStr(md, "type")));
             methodRetJt.put(md.name, getStr(md, "type"));
             if (md.isNative()) {
                 int ar = (md.formalParameters != null && md.formalParameters.parameters != null)
@@ -239,11 +293,11 @@ public class AstLowerMain {
 
     void method(Java.MethodDeclarator m) {
         Ir.Func f = new Ir.Func(); f.name = m.name;
-        f.retType = mapType(getStr(m, "type"));
+        f.retType = irType(getStr(m, "type"));
         curFunc = f; allocaOf.clear(); varType.clear(); varJType.clear(); breaks.clear(); conts.clear();
         for (Object p : m.formalParameters.parameters) {
             if (!(p instanceof Java.FunctionDeclarator.FormalParameter fp)) continue;
-            String pt = mapType(getStr(fp, "type"));
+            String pt = irType(getStr(fp, "type"));
             varJType.put(fp.name, getStr(fp, "type"));
             f.params.add(new String[]{fp.name, pt});
         }
@@ -266,8 +320,9 @@ public class AstLowerMain {
     void stmt(Java.BlockStatement s) {
         if (s instanceof Java.LocalVariableDeclarationStatement d) {
             for (Java.VariableDeclarator vd : d.variableDeclarators) {
-                String dt = mapType(getStr(d, "type"));
-                varJType.put(vd.name, getStr(d, "type"));
+                String jt = getStr(d, "type");
+                String dt = irType(jt);
+                varJType.put(vd.name, jt);
                 Ir.Value a = emit("alloca", dt); a.dbg = tag(s);
                 allocaOf.put(vd.name, a); varType.put(vd.name, dt);
                 prog.debug.declNames.put(a.dbg, vd.name);
@@ -419,6 +474,15 @@ public class AstLowerMain {
             Ir.Value st = emit("st_" + el, "void", ad, v); st.dbg = tag(a);
             return;
         }
+        if (a.lhs instanceof Java.AmbiguousName fa && fa.identifiers.length > 1) {
+            if (fa.identifiers[1].equals("length"))
+                throw new RuntimeException("cannot assign to .length");
+            FieldAddr f = fieldAddr(fa);
+            if (f == null) throw new RuntimeException("cannot assign field target: " + fa.identifiers[0]);
+            Ir.Value v = conv(expr(a.rhs), f.ir);
+            Ir.Value st = emit("st_" + f.ir, "void", f.addr, v); st.dbg = tag(a);
+            return;
+        }
         String name = null;
         if (a.lhs instanceof Java.AmbiguousName an) name = an.identifiers[0];
         if (name == null) { System.err.println("# assign target unsupported"); return; }
@@ -457,6 +521,36 @@ public class AstLowerMain {
         emit("jump", "void", blockRef(mh));
         curFunc.blocks.add(mx); cur = mx;
         return a;
+    }
+
+    static class FieldAddr { Ir.Value addr; String ir; String jt; FieldAddr(Ir.Value a, String i, String j){addr=a; ir=i; jt=j;} }
+
+    /** Резолвира верига `<var>.<fld>…` до АДРЕСА на последното поле: load-ва базовия
+     *  указател на var-а и прекосява prefix-полетата с lea_field+ld_ptr. */
+    FieldAddr fieldAddr(Java.AmbiguousName an) {
+        if (an.identifiers.length < 2) return null;
+        String[] ids = new String[an.identifiers.length];
+        for (int i = 0; i < ids.length; i++) ids[i] = an.identifiers[i];
+        String jt = varJType.get(ids[0]);
+        if (jt == null || !classIndex.containsKey(jt)) return null;
+        Ir.Value v = null;
+        Ir.Value al = allocaOf.get(ids[0]);
+        if (al != null) { v = emit("load", al.type, al); v.dbg = tag(an); }
+        for (int k = 1; k < ids.length; k++) {
+            Map<String, Object[]> fs = classFields.get(jt);
+            if (fs == null) throw new RuntimeException("member access on non-class '" + ids[0] + "' (" + jt + ")");
+            Object[] f = fs.get(ids[k]);
+            if (f == null) throw new RuntimeException("no field " + ids[k] + " on " + jt);
+            int off = (Integer) f[1];
+            Ir.Value o = konst(off, "i64", tag(an));
+            Ir.Value ad = emit("lea_field", "ptr", v, o); ad.dbg = tag(an);
+            if (k == ids.length - 1) return new FieldAddr(ad, (String) f[0], (String) f[2]);
+            v = emit("ld_ptr", "ptr", ad); v.dbg = tag(an);
+            jt = (String) f[2];
+            if (!classIndex.containsKey(jt))
+                throw new RuntimeException("cannot chain field '" + ids[k] + "' (not an object): " + jt);
+        }
+        return null;
     }
 
     /** String-метод receiver: `s.equals(t)` идва като AmbiguousName [s, equals]
@@ -509,18 +603,39 @@ if (e == null) return konst(0, "i32", -1);
         }
         if (e instanceof Java.AmbiguousName an) {
             if (an.identifiers.length > 1) {
-                if (!an.identifiers[1].equals("length"))
-                    throw new RuntimeException("member access on non-array '" + an.identifiers[0] + "' (fields unsupported)");
-                Ir.Value al = allocaOf.get(an.identifiers[0]);
-                if (al == null) throw new RuntimeException("undefined: " + an.identifiers[0]);
-                Ir.Value b = emit("load", al.type, al); b.dbg = tag(e);
-                Ir.Value l = emit("len", "i32", b); l.dbg = tag(e);
-                return l;
+                if (an.identifiers[1].equals("length")) {
+                    Ir.Value al = allocaOf.get(an.identifiers[0]);
+                    if (al == null) throw new RuntimeException("undefined: " + an.identifiers[0]);
+                    Ir.Value b = emit("load", al.type, al); b.dbg = tag(e);
+                    Ir.Value l = emit("len", "i32", b); l.dbg = tag(e);
+                    return l;
+                }
+                FieldAddr fa = fieldAddr(an);
+                if (fa != null) {
+                    Ir.Value l = emit("ld_" + fa.ir, fa.ir, fa.addr); l.dbg = tag(e);
+                    return l;
+                }
+                throw new RuntimeException("member access on non-array/object '" + an.identifiers[0] + "' (fields unsupported)");
             }
             String n = an.identifiers[0];
             Ir.Value al = allocaOf.get(n);
             if (al != null) { Ir.Value l = emit("load", al.type, al); l.dbg = tag(e); return l; }
             throw new RuntimeException("undefined: " + n);
+        }
+        if (e instanceof Java.NewClassInstance nci) {
+            Object t = get(nci, "type");
+            String cn = t == null ? null : t.toString();
+            if (cn != null && classIndex.containsKey(cn)) {
+                Object argsO = get(nci, "arguments");
+                int na = argsO instanceof Object[] o ? o.length : 0;
+                if (na != 0) throw new RuntimeException("constructor with args unsupported: new " + cn);
+                int sz = classSizes.get(cn);
+                Ir.Value c = konst(sz, "i32", tag(e));
+                Ir.Value a = emit("alloc_obj", "ptr", c); a.dbg = tag(e);
+                Ir.Value h = emit("st_hdr", "void", a, konst(classIndex.get(cn), "i32", tag(e))); h.dbg = tag(e);
+                return a;
+            }
+            throw new RuntimeException("new " + cn + ": unsupported type");
         }
         if (e instanceof Java.NewArray na) {
             Object de = get(na, "dimExprs");

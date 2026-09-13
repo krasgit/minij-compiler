@@ -95,6 +95,20 @@
 - Trace-tables per клас (reference bitmap), **safepoint GC maps** (per-thread ready).
 - Виртуални повиквания, `super`.
 
+> **Статус (P3 — classes: fields + new + access).** Pre-pass `collectClass` строи layout:
+> обект = 8-byte header (class index via `st_hdr`) + instance-полета от +8, aligned по тип
+> (i32→4, i64/f64/ptr→8); `classIndex/classSizes/classFields` се пълнят от
+> `getVariableDeclaratorsAndInitializers()` за всички типове ПРЕДИ lowering (свободни
+> препратки напред). `new Foo()` = `Java.NewClassInstance` (0-арг, `type.toString()` е името)
+> → нов op `alloc_obj size` (arm+s86 rule: mm_alloc) + `st_hdr classIndex`. Достъп
+> `f.x`/`f.x=v` = `AmbiguousName[f,x]` → `fieldAddr`: `load` base от alloca, преходи с
+> `lea_field` (нов op: `add dst, base, offset`; offset-i64 const) и `ld_ptr` за вериги
+> (`h.next.next.v` — 4 ids), после `ld_<ft>`/`st_<ft>`. Типове: `irType`/`javaTypeOf`/
+> `inferType`/`elemOf` разпознават клас-имена → `ptr`. Regalloc/Emitter непроменени освен
+> новите ops. Пример `examples/obj.mj`; регресия **19/19 (arm64)**; x86 textual emit OK.
+> Остатък P3: конструктори с аргументи/`this`, методи + overloads, vtable dispatch,
+> `instanceof`/cast, наследяване, static полета/методи.
+
 ## P3.5 — GC решение (слот)
 - **A)** Ръчен conservative mark&sweep (stack scan).
 - **B)** MMTk binding (Rust, `VMBinding` FFI).

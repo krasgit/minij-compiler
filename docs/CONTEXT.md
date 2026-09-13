@@ -44,38 +44,47 @@ regression + docs + commit + push.
 - Commit history: `8873729` P0 → `318c431` P1 types → `60f704e` P1 native →
   `824824d` P2 arrays → `b5f2736` P2 String/char/System.out →
   `e89d6f4` P2 multi-D arrays + stack spill → `a094239` docs/CONTEXT.md →
-  **`b9e3499` P2 String.equals/concat (HEAD, pushed)**.
+  `b9e3499` P2 String.equals/concat → `7840f2c` docs CONTEXT HEAD;
+  плюс следващия за P3 classes (виж Status).
 
-## Status (актуално към HEAD = b9e3499)
+## Status (актуално към HEAD = <сет: P3 classes>)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
-  (18/18 regression — str3.mj)**.
-- ACTIVE: P2 напълно приключен (освен GC seam layout / TLS-ready allocator, всичко е done).
-  Следваща стъпка = по-долу в NEXT MOVE.
-- Regression: **18/18 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+  (18/18 regression — str3.mj)**; **P3 classes: fields+new+access (19/19 — obj.mj)**.
+- ACTIVE: P3 в ход — първата част (полета/new/достъп) е приключена; следват методи/overloads,
+  конструктори/`this`, `instanceof`/cast, vtable (виж NEXT MOVE).
+- Regression: **19/19 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
-  **str3** (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`).
+  str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
+  **obj** (`5/7/6/12`, `1/2/3/1`, exit 2).
 
 ## NEXT MOVE (при "continue")
 
-P2 String.equals/concat е **завършен** → следващият кандидат по roadmap:
-1. **P3 Objects** — голямата следваща фаза: symbol/type table, класове/полета/методи/overloads;
-   object header дума (class index + monitor/bias bits + GC bits); `new`, поле достъп,
-   virtual calls/`call` overload с обекти, `instanceof`/cast. Свалено от ROADMAP: N+1 hit —
-   методите на обекти ще изискват `dispatch` (class index → vtable), което ще усложни
-   Regalloc/Emitter.
-2. (останало в P2) **GC seam layout / TLS-ready allocator** — `mm_alloc` kind аргументът и
-   header-думата за обектите се решават заедно с P3.
+P3 classes (fields+new+access) е **завършен** → следващите P3 под-милстони, по реда:
+1. **P3 методи + overloads (диспеч пръв път без vtable)** — instance-методи на класове,
+   разграничаване от native/String системните; `mi.target` ще бъде `AmbigName[obj, метод]`
+   (като String.identical model) — receiver стойността вече я имаме през `fieldAddr`-логиката.
+   Логиката от `MethodInvocation` String-детекцията може да се генерализира към класове.
+2. **P3 конструктори с аргументи + `this`** — `NewClassInstance.arguments` → извикване на
+   ctor метода след `alloc_obj`, `this` = параметър 0.
+3. **P3 vtable dispatch / наследяване, `instanceof`/cast** — class index → vtable, Regalloc/
+   Emitter усложнение (N+1 hit от ROADMAP).
+4. Static полета/методи, `Foo[]` (cells=ptr, вече готово в `elemOf`).
 
-Първа стъпка преди кода: ~10-минутно проучване на Janino AST за избрания feature (SPIA или
-продължи модела с probe файлове в `/tmp/opencode`), после frontend,
-rules ако има нови ops, пример (`examples/*.mj`), добавяне в `run_tests.sh`, bumper на
-елементите, README/ROADMAP/CONTEXT, комит+push.
+Проучване преди кода: probe файлове в `/tmp/opencode` (OProbe/OProbe2/OProbe3/SEProbe).
+Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `run_tests.sh`
+(19/19→N/N) → README/ROADMAP/CONTEXT → комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
 
 ### Janino AST (верни, supersede по-стари предположения)
+- **P3 classes shapes**: `class Foo { int x; long w; String s; }` — класовите полета се взимат
+  през `cd.getVariableDeclaratorsAndInitializers()` (рефлексия `invoke0`), елемент = FieldDeclaration
+  cъс `type` (Java type toString: "int"/"long"/"String"/"Foo") и `variableDeclarators` (Object[]).
+  `new Foo()` → `Java.NewClassInstance(type.toString()="Foo", arguments=[], qualification=null)`;
+  0-арг ctor. Достъп `f.x` = **`AmbiguousName[f, x]`**, `f.x = v` → `Assignment(lhs=AmbigName…,
+  rhs)`; верига `h.next.next.v` = AmbigName с 4 ids. `.length` само за масиви/String.
 - `StringLiteral.value` = суров source ВКЛ. `"…"` кавичките, escapes необработени.
 - `CharacterLiteral.value` е **String** (не Character), суров с `'…'` и необработени escapes.
   Frontend `decodeString(raw, q)` сваля кавичките и декодира `\n \t \r \b \f \0 \\ \" \' \uXXXX`.
@@ -100,6 +109,13 @@ rules ако има нови ops, пример (`examples/*.mj`), добавян
   типизира като "String") — пълният `length>1 → int` чупи String dispatch-а.
 
 ### Типове / layout
+- **P3 object layout**: обект = 8-byte header (class index + pad/GC), полета от +8, aligned по тип
+  (i32→4, i64/f64/ptr→8); `collectClass` pre-pass строи `classIndex (className→int)`, `classSizes`
+  (мин. 16, align 8), `classFields (cls → field → {irType, byteOff, javaType})` от всички типове
+  ПРЕДИ lowering (свободни препратки). Header index се записва с `st_hdr` (i32 const).
+- **Нови ops в P3**: `alloc_obj(size-i32)` (arm: sxtw x9→x0; mm_alloc; x86: movslq→%rdi) и
+  `lea_field(base-ptr, off-i64 const)` (arm: `add dst, a, o` — и двата x-reg; x86: movq+addq).
+  ЗАБЕЛЕЖКА: arm `mov x0, ${w-reg}` от i32 const НЕ валиден — винаги `sxtw x9, ${c}`.
 - `String` = lean `char[]` (i32 header + 4-byte cells, copy-by-reference); `mapType("String")→"ptr"`;
   елементен достъп до String → `"i32"` (`elemOfAccess("String")`).
 - Масив: 8-byte header за i64/ptr/f64, i32-за i32?; header=[len:u32][pad], data при +8;
@@ -146,9 +162,9 @@ rules ако има нови ops, пример (`examples/*.mj`), добавян
 
 ## Testing
 
-- `cd /tmp/opencode && bash run_tests.sh` → build + 18 теста; текущ резултат **18/18**.
+- `cd /tmp/opencode && bash run_tests.sh` → build + 19 теста; текущ резултат **19/19**.
 - Тест функции: `run name src exitcode`, `run_out name src exitcode $'expected\nout\n'`;
-  добавяне на нов пример = `run_out str3 "$DIR/examples/str3.mj" 0 $'1\n0\n0\n7\nabcdef\n6\n6\nxabc\nabcABcd\n1\n'`
+  добавяне на нов пример = `run_out obj "$DIR/examples/obj.mj" 2 $'5\n7\n6\n12\n1\n2\n3\n1\n'`
   + обновяват се броя и README/ROADMAP/CONTEXT.
 - Примерни файлове за multi-D: `examples/md.mj`. OOB multi-D (m7/m8 .mj в /tmp/opencode) → exit 134.
 - Отделни минимални програми за бисouter (m1..m8.mj) стоят в /tmp/opencode; не се комитват.
@@ -157,19 +173,21 @@ rules ако има нови ops, пример (`examples/*.mj`), добавян
 
 - `tools/ast-lower/AstLowerMain.java` — frontend (mapType/elemOf/elemOfAccess/javaTypeOf/varJType/
   methodRetJt/newArray2D/NewArray rewrite/FieldAccessExpression.length/inferType/decodeString/
-  System.out dispatch; varElem е премахнат).
+  System.out dispatch/String-methods dispatch; **P3: collectClass/invoke0/irType/fieldAddr (FieldAddr
+  = addr+ir+javaType)/NewClassInstance→alloc_obj+st_hdr/object-field read+write**; varElem е премахнат).
 - `common/Emitter.java` — spill support (spillTemp/spillBytes/stemp/slotMem/spillLoad/spillStore/
   prepareSpills/saveSpills/maxSpillBytes), x86 ptr→movq, template interpreter + Ctx.
 - `common/Regalloc.java` — linear scan + preassign, loop/phi/void liveness, "stack -N" locs.
 - `common/RuleParser.java` — rule v2 parser (Rules.width/isFpType).
-- `rules/arm.rule`, `rules/x86.rule` — include `alloc_i32/i64/f64/ptr`, `st_hdr`, `len`, `chk`,
-  `lea_i32/i64/f64/ptr`, `ld_i32/i64/f64/ptr`, `st_i32/i64/f64/ptr`, CONST/MOV/ADD/…, prologue/epilogue.
+- `rules/arm.rule`, `rules/x86.rule` — include `alloc_i32/i64/f64/ptr`/`alloc_obj`, `st_hdr`, `len`,
+  `chk`, `lea_i32/i64/f64/ptr`/`lea_field`, `ld_i32/i64/f64/ptr`, `st_i32/i64/f64/ptr`,
+  CONST/MOV/ADD/…, prologue/epilogue.
 - `runtime/runtime.c`, `runtime/crt0.S` — k_* helpers (`k_print/k_println`, `k_print_i32/
   k_println_i32`, `k_newline`, **`k_string_equals`/`k_string_concat`**), mm_alloc, syscalls.
 - `examples/*.mj` — hello, gcd, fib, forloop, dowhile, ternary, switch, print, dbl, lng, mix,
-  arrays, oob, str, str2, md, **str3**, native.
+  arrays, oob, str, str2, md, str3, **obj**, native.
 - `/tmp/opencode/run_tests.sh` — regression harness.
-- `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD) — Janino AST probes, преизползваеми.
+- `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD/SE/**OProbe**/OProbe2/OProbe3) — Janino AST probes, преизползваеми.
 - `README.md`, `docs/ROADMAP.md`, `docs/ir-format.md`, `docs/rule-format.md`, `docs/corelib.md`.
 
 ## При съмнение

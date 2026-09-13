@@ -309,6 +309,13 @@ emit alloc_ptr(c) {
     bl mm_alloc
     mov ${dst}, x0
 }
+emit alloc_obj(c) {
+    sxtw x9, ${c}
+    mov x0, x9
+    mov x1, #0
+    bl mm_alloc
+    mov ${dst}, x0
+}
 emit st_hdr(a, c) {
     str ${c}, [${a}]
 }
@@ -340,6 +347,9 @@ emit lea_ptr(a, i) {
     sxtw x9, ${i}
     add x9, ${a}, x9, lsl #3
     add $dst, x9, #8
+}
+emit lea_field(a, o) {
+    add ${dst}, ${a}, ${o}
 }
 emit ld_i32(a) {
     ldr $dst, [${a}]
