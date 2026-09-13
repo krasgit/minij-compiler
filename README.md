@@ -93,13 +93,14 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **20/20 теста на arm64**
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **21/21 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
 str3 `1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1` (String equals/concat),
 obj `5/7/6/12`, `1/2/3/1`, exit 2 (P3 classes),
-obj2 `6/7/7/17/117`, `7/14/8`, exit 10 (P3 methods/overloads); всеки — exit code + stdout чек).
+obj2 `6/7/7/17/117`, `7/14/8`, exit 10 (P3 methods/overloads),
+obj3 `3/30/10/20`, `5/6/100/15`, exit 26 (P3 ctors/this); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -147,6 +148,19 @@ exact match (`resolveSig`). Native `puti`/`println`/System.out и String equals/
 са незасегнати — bare-name повиквания на потребителски static методи (напр. `half(3)`) се
 резолвират във втория dispatch pass. Пример `examples/obj2.mj` (Counter с `inc()`/`sum()` overloads/
 static `make`, cross-class `Util.twice` → `6/7/7/17/117`, `7/14/8`, exit 10).
+
+### Обекти / класове (P3, конструктори + `this` chaining)
+
+Конструкторите са `Java.ConstructorDeclarator` в `cd.constructors` (извън `declaredMethods`,
+`name="<init>"`), символи `Foo_init[<_irparams>]`; `new Foo(args)` → `alloc_obj`+`st_hdr` +
+call към ctor-а с args=`[obj, args…]` (overload резолюция с `resolveSig` по
+`classMethods["Foo::<init>"]`; без ctor при 0-арг → само alloc в zeroed-arena). `this(...)`
+в ctor тяло (отделното поле `constructorInvocation` = `AlternateConstructorInvocation`) →
+call `this`-тор-а с `[this, args…]` преди тялото. Попътно: **void returns** вече се емитират
+`return` без стойност (rule `return()` в arm.rule/x86.rule; `Ir.Reader` спира да suffix-ва
+`return` за void функции — досегашния фантомен null arg даваше `mov x0, w9`).
+Пример `examples/obj3.mj` (Point `this(1,2)` chaining + `new Point(10,20)`, Counter 0-арг и с
+арг ctors, `new Point(7,8).sum()` → `3/30/10/20`, `5/6/100/15`, exit 26).
 
 ## Пътна карта
 

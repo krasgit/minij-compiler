@@ -1,0 +1,44 @@
+class Point {
+    int x;
+    int y;
+    Point() {
+        this(1, 2);
+    }
+    Point(int x0, int y0) {
+        this.x = x0;
+        y = y0;
+    }
+    int sum() {
+        return x + y;
+    }
+}
+class Counter {
+    int n;
+    Counter() {
+        n = 100;
+    }
+    Counter(int start) {
+        n = start;
+    }
+    int inc() {
+        n = n + 1;
+        return n;
+    }
+}
+class T {
+    static int main() {
+        Point a = new Point();
+        Point b = new Point(10, 20);
+        puti(a.sum());
+        puti(b.sum());
+        puti(b.x);
+        puti(b.y);
+        Counter c = new Counter(5);
+        puti(c.n);
+        puti(c.inc());
+        Counter d = new Counter();
+        puti(d.n);
+        puti(new Point(7, 8).sum());
+        return c.n + b.y;
+    }
+}

@@ -293,6 +293,7 @@ public class AstLowerMain {
 
     void cls(Java.ClassDeclaration cd) {
         List<?> methods = getList(cd, "declaredMethods");
+        List<?> cstrs = getList(cd, "constructors");
         if (methods == null) return;
         String cn = getStr(cd, "name");
         if (cn == null) cn = "T";
@@ -307,52 +308,86 @@ public class AstLowerMain {
                 nativeMangle.put(md.name, "k_native_" + cn + "_" + md.name + "_" + ar);
                 continue;
             }
-            MethSig s = new MethSig();
-            s.cn = cn; s.name = md.name;
-            s.isStatic = methodStatic(md);
-            s.retIr = irType(jt); s.retJt = jt;
-            int ar = md.formalParameters != null && md.formalParameters.parameters != null
-                    ? md.formalParameters.parameters.length : 0;
-            s.pjts = new String[ar]; s.pirs = new String[ar];
-            for (int i = 0; i < ar; i++) {
-                Object fp = md.formalParameters.parameters[i];
-                if (fp instanceof Java.FunctionDeclarator.FormalParameter f) {
-                    s.pjts[i] = getStr(f, "type");
-                    s.pirs[i] = irType(s.pjts[i]);
-                }
-            }
-            if (md.name.equals("main")) s.symbol = "main";
-            else {
-                StringBuilder t = new StringBuilder();
-                for (String p : s.pirs) t.append('_').append(p);
-                s.symbol = cn + "_" + md.name + t;
-            }
+            MethSig s = buildSig(md, cn, md.name, md.name.equals("main") ? "main" : buildSigMangle(cn, md.name, md));
             classMethods.computeIfAbsent(cn + "::" + md.name, k -> new ArrayList<>()).add(s);
+        }
+        if (cstrs != null) for (Object co : cstrs) {
+            if (!(co instanceof Java.ConstructorDeclarator cdf)) continue;
+            MethSig s = buildSig(cdf, cn, "<init>", ctorSym(cn, cdf));
+            s.retIr = "void"; s.retJt = "void"; s.isStatic = false;
+            classMethods.computeIfAbsent(cn + "::<init>", k -> new ArrayList<>()).add(s);
         }
         for (Object mo : methods) {
             if (!(mo instanceof Java.MethodDeclarator m)) continue;
             if (m.isNative()) continue;
-            MethSig sig = null;
-            List<MethSig> ls = classMethods.get(cn + "::" + m.name);
-            if (ls != null && !ls.isEmpty()) {
-                int ar = m.formalParameters != null && m.formalParameters.parameters != null
-                        ? m.formalParameters.parameters.length : 0;
-                for (MethSig s : ls) {
-                    if (s.arity() != ar) continue;
-                    boolean ok = true;
-                    for (int i = 0; i < ar; i++) {
-                        Object fp = m.formalParameters.parameters[i];
-                        String fj = fp instanceof Java.FunctionDeclarator.FormalParameter f ? getStr(f, "type") : null;
-                        if (fj == null || !fj.equals(s.pjts[i])) { ok = false; break; }
-                    }
-                    if (ok) { sig = s; break; }
-                }
-            }
-            method(m, sig);
+            method(m, matchSig(m, cn, m.name));
+        }
+        if (cstrs != null) for (Object co : cstrs) {
+            if (!(co instanceof Java.ConstructorDeclarator cdf)) continue;
+            method(cdf, matchSig(cdf, cn, "<init>"));
         }
     }
 
-    void method(Java.MethodDeclarator m, MethSig sig) {
+    /** Сигнатура на метод/ctor — params от формалните параметри. */
+    MethSig buildSig(Java.FunctionDeclarator fd, String cn, String name, String symbol) {
+        MethSig s = new MethSig();
+        s.cn = cn; s.name = name;
+        s.isStatic = fd instanceof Java.MethodDeclarator md && methodStatic(md);
+        s.retIr = irType(getStr(fd, "type")); s.retJt = getStr(fd, "type");
+        int ar = fd.formalParameters != null && fd.formalParameters.parameters != null
+                ? fd.formalParameters.parameters.length : 0;
+        s.pjts = new String[ar]; s.pirs = new String[ar];
+        for (int i = 0; i < ar; i++) {
+            Object fp = fd.formalParameters.parameters[i];
+            if (fp instanceof Java.FunctionDeclarator.FormalParameter f) {
+                s.pjts[i] = getStr(f, "type");
+                s.pirs[i] = irType(s.pjts[i]);
+            }
+        }
+        s.symbol = symbol;
+        return s;
+    }
+    String buildSigMangle(String cn, String nm, Java.FunctionDeclarator fd) {
+        StringBuilder t = new StringBuilder();
+        Object fpp = fd.formalParameters;
+        Object[] ps = fpp == null ? null : (Object[]) get(fpp, "parameters");
+        if (ps != null) for (Object p : ps)
+            if (p instanceof Java.FunctionDeclarator.FormalParameter f)
+                t.append('_').append(irType(getStr(f, "type")));
+        return cn + "_" + nm + t;
+    }
+    String ctorSym(String cn, Java.ConstructorDeclarator cdf) {
+        StringBuilder t = new StringBuilder();
+        Object fpp = cdf.formalParameters;
+        Object[] ps = fpp == null ? null : (Object[]) get(fpp, "parameters");
+        if (ps != null) for (Object p : ps)
+            if (p instanceof Java.FunctionDeclarator.FormalParameter f)
+                t.append('_').append(irType(getStr(f, "type")));
+        return cn + "_init" + t;
+    }
+
+    /** Match сигнатурата от DB към конретния declarator (по arity + java типове). */
+    MethSig matchSig(Java.FunctionDeclarator m, String cn, String dbName) {
+        MethSig sig = null;
+        List<MethSig> ls = classMethods.get(cn + "::" + dbName);
+        if (ls != null && !ls.isEmpty()) {
+            int ar = m.formalParameters != null && m.formalParameters.parameters != null
+                    ? m.formalParameters.parameters.length : 0;
+            for (MethSig s : ls) {
+                if (s.arity() != ar) continue;
+                boolean ok = true;
+                for (int i = 0; i < ar; i++) {
+                    Object fp = m.formalParameters.parameters[i];
+                    String fj = fp instanceof Java.FunctionDeclarator.FormalParameter f ? getStr(f, "type") : null;
+                    if (fj == null || !fj.equals(s.pjts[i])) { ok = false; break; }
+                }
+                if (ok) { sig = s; break; }
+            }
+        }
+        return sig;
+    }
+
+    void method(Java.FunctionDeclarator m, MethSig sig) {
         Ir.Func f = new Ir.Func();
         f.name = sig != null ? sig.symbol : m.name;
         f.retType = sig != null ? sig.retIr : irType(getStr(m, "type"));
@@ -378,9 +413,31 @@ public class AstLowerMain {
             Ir.Value pm = new Ir.Value("param", pt); pm.imm = i;
             Ir.Value st = emit("store","void",a,pm); st.dbg = a.dbg;
         }
+        // ctor chaining: this(args) преди тялото
+        if (m instanceof Java.ConstructorDeclarator cdf
+                && cdf.constructorInvocation instanceof Java.AlternateConstructorInvocation aci
+                && curClass != null) {
+            Java.Rvalue[] ciArgs = aci.arguments;
+            List<MethSig> cs = classMethods.get(curClass + "::<init>");
+            MethSig csig = cs == null ? null : resolveSig(cs, ciArgs);
+            if (csig == null) throw new RuntimeException("no matching constructor for this(...) in " + curClass);
+            List<Ir.Value> cargs = new ArrayList<>();
+            Ir.Value al = allocaOf.get("this");
+            Ir.Value th = emit("load", al.type, al); th.dbg = -1;
+            cargs.add(th);
+            for (int i = 0; i < ciArgs.length; i++)
+                if (ciArgs[i] != null)
+                    cargs.add(conv(expr(ciArgs[i]), csig.pirs[i] == null ? "i32" : csig.pirs[i]));
+            Ir.Value call = emit("call", "i32");
+            call.name = csig.symbol;
+            call.args.addAll(cargs);
+            call.dbg = -1;
+        }
         for (Object s : m.statements) if (s instanceof Java.BlockStatement bs) stmt(bs);
-        if (cur.term()==null || !Ir.isTerm(cur.term().op))
-            emit("return","void", f.retType.equals("void") ? null : konst(0, f.retType.equals("void") ? "i32" : f.retType, -1));
+        if (cur.term()==null || !Ir.isTerm(cur.term().op)) {
+            if (f.retType.equals("void")) emit("return","void");
+            else emit("return","void", konst(0, f.retType, -1));
+        }
         prog.funcs.add(f);
         curClass = null;
     }
@@ -810,11 +867,26 @@ if (e == null) return konst(0, "i32", -1);
             if (cn != null && classIndex.containsKey(cn)) {
                 Object argsO = get(nci, "arguments");
                 int na = argsO instanceof Object[] o ? o.length : 0;
-                if (na != 0) throw new RuntimeException("constructor with args unsupported: new " + cn);
                 int sz = classSizes.get(cn);
                 Ir.Value c = konst(sz, "i32", tag(e));
                 Ir.Value a = emit("alloc_obj", "ptr", c); a.dbg = tag(e);
                 Ir.Value h = emit("st_hdr", "void", a, konst(classIndex.get(cn), "i32", tag(e))); h.dbg = tag(e);
+                List<MethSig> cs = classMethods.get(cn + "::<init>");
+                Java.Rvalue[] car = argsO instanceof Object[] oa ? (Java.Rvalue[]) oa : new Java.Rvalue[0];
+                MethSig csig = cs == null ? null : resolveSig(cs, car);
+                if (csig == null && na != 0)
+                    throw new RuntimeException("no matching constructor: new " + cn + "(" + na + " args)");
+                if (csig != null) {
+                    List<Ir.Value> cargs = new ArrayList<>();
+                    cargs.add(a);
+                    for (int i = 0; i < car.length; i++)
+                        if (car[i] != null)
+                            cargs.add(conv(expr(car[i]), csig.pirs[i] == null ? "i32" : csig.pirs[i]));
+                    Ir.Value call = emit("call", "i32");
+                    call.name = csig.symbol;
+                    call.args.addAll(cargs);
+                    call.dbg = tag(e);
+                }
                 return a;
             }
             throw new RuntimeException("new " + cn + ": unsupported type");

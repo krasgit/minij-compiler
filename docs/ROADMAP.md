@@ -106,8 +106,16 @@
 > (`h.next.next.v` — 4 ids), после `ld_<ft>`/`st_<ft>`. Типове: `irType`/`javaTypeOf`/
 > `inferType`/`elemOf` разпознават клас-имена → `ptr`. Regalloc/Emitter непроменени освен
 > новите ops. Пример `examples/obj.mj`; регресия **19/19 (arm64)**; x86 textual emit OK.
-> Остатък P3: конструктори с аргументи/`this`, vtable dispatch, `instanceof`/cast,
-> наследяване, static полета/методи.
+> Регресия сега: **21/21 (arm64)** — obj, obj2, obj3 добавени.
+> Остатък P3: vtable dispatch, `instanceof`/cast, наследяване, static полета.
+>
+> **P3 конструктори + `this` chaining (DONE, пример `examples/obj3.mj`, регресия 21/21):**
+> `new Foo(args)` → alloc_obj+st_hdr + call `Foo_init[<_irparams>]` ([obj, args…], overload
+> резолюция по `classMethods["Foo::<init>"]`); без ctor при 0-арг → само alloc (zeroed arena).
+> `this(...)` = отделен `constructorInvocation` (`AlternateConstructorInvocation`) → call преди
+> тялото с `[this, args…]`. Конструкторите са в `cd.constructors` (не `declaredMethods`).
+> Bugfix: void `return` без аргумент (Reader/SsaLower оставят `return` гол, нови rule-и `return()`
+> в arm.rule/x86.rule) — фантомния null arg даваше `mov x0, w9`.
 >
 > **P3 методи + overloads (DONE, пример `examples/obj2.mj`, регресия 20/20):** instance-методи
 > `obj.m(args)` + static `Cls.m(args)` диспеч без vtable. `cls()` гради `MethSig` DB в

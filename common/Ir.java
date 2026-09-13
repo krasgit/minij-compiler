@@ -251,7 +251,7 @@ public class Ir {
                 Value v = new Value("branch","void",lookup(cid),tb,eb); v.dbg=dbg; curB.ins.add(v); return;
             }
             if (body.startsWith("return")) {
-                Value v = new Value("RETURN_" + suffix(cur.retType), "void"); String r = body.substring(6).trim();
+                Value v = new Value(cur.retType.equals("void") ? "return" : "RETURN_" + suffix(cur.retType), "void"); String r = body.substring(6).trim();
                 if (!r.isEmpty() && r.startsWith("%")) v.args.add(lookup(Integer.parseInt(r.substring(1))));
                 v.dbg=dbg; curB.ins.add(v); return;
             }

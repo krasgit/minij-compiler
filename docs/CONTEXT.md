@@ -46,36 +46,38 @@ regression + docs + commit + push.
   `e89d6f4` P2 multi-D arrays + stack spill → `a094239` docs/CONTEXT.md →
   `b9e3499` P2 String.equals/concat → `7840f2c` docs CONTEXT HEAD →
   `081e7a2` P3 classes: fields+new+access → `da04822` docs →
-  **`8f11393` P3 methods + overloads (HEAD, pushed)**.
+  `8f11393` P3 methods + overloads → `16b46dc` docs → **P3 ctors (next)**.
 
-## Status (актуално към HEAD = 8f11393)
+## Status (актуално към HEAD = 16b46dc)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
   (18/18 regression — str3.mj)**; **P3 classes: fields+new+access (19/19 — obj.mj)**;
-  **P3 methods + overloads (20/20 — obj2.mj: instance/static/this/overloads, mangled symbols)**.
-- ACTIVE: P3 в ход — методи/overloads приключени; следват конструктори/`this` в аргументи,
-  `instanceof`/cast, vtable (виж NEXT MOVE).
-- Regression: **20/20 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+  **P3 methods + overloads (20/20 — obj2.mj)**;
+  **P3 конструктори с аргументи + `this` chaining (21/21 — obj3.mj)**.
+- ACTIVE: P3 в ход — конструктори/`this` приключени; следват `instanceof`/cast с наследяване,
+  vtable (виж NEXT MOVE).
+- Regression: **21/21 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
   str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
   **obj** (`5/7/6/12`, `1/2/3/1`, exit 2),
-  **obj2** (`6/7/7/17/117`, `7/14/8`, exit 10).
+  **obj2** (`6/7/7/17/117`, `7/14/8`, exit 10),
+  **obj3** (`3/30/10/20`, `5/6/100/15`, exit 26).
 
 ## NEXT MOVE (при "continue")
 
-P3 methods + overloads е **завършен** → следващите P3 под-милстони, по реда:
-1. **P3 конструктори с аргументи + `this` изрично** — `NewClassInstance.arguments` (напр.
-   `new Counter(5)`) → alloc_obj + извикване на ctor (символ `Foo_Foo_...`), `this` = param 0
-   (още ГОТОВО от methods-милстона — scand вcls()); разграничаване ctor от обикновен метод
-   (по име == клас), при липса на дефиниран ctor → 0-арг като сега.
-2. **P3 vtable dispatch / наследяване, `instanceof`/cast** — class index → vtable, Regalloc/
-   Emitter усложнение (N+1 hit от ROADMAP).
-3. Static полета/методи (call вече е готов; static ПОЛЕТА остават), `Foo[]` (cells=ptr, готово в `elemOf`).
+P3 конструктори + `this` chaining е **завършен** → следващите P3 под-милстони, по реда:
+1. **P3 `instanceof`/cast + наследяване (extends)** — обект header пази class index; `instanceof`
+   = сравняване на индекса (за сега без подтип-вериги), cast = typecheck (SIGABRT/0-af след
+   грешни). За наследяване: `extendedType` на `NamedClassDeclaration` → super = клас (проблемът е
+   `classMethods`/`classFields` ключове и скрит super-call `SuperConstructorInvocation` в ctor-ите).
+2. **P3 vtable dispatch / виртуални методи** — class index → vtable (N+1 hit от ROADMAP),
+   `accept`-без subclass-се например, dynamic dispatch на методи по името.
+3. Static полета (call вече е готов; static ПОЛЕТА остават), `Foo[]` насочване + `foreach`? не.
 
-Проучване преди кода: probe файлове в `/tmp/opencode` (OProbe/OProbe2/OProbe3/SEProbe).
+Проучване преди кода: probe файлове в `/tmp/opencode` (OProbe/OProbe2/OProbe3/CtorProbe/SEProbe).
 Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `run_tests.sh`
-(20/20→N/N) → README/ROADMAP/CONTEXT → комит+push.
+(21/21→N/N) → README/ROADMAP/CONTEXT → комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
 
@@ -104,6 +106,23 @@ P3 methods + overloads е **завършен** → следващите P3 по�
   с args=[recv, arg0]; receiver стойността за AmbigName[recv,метод] = `load` от alloca-та на ids[0]
   (иначе `expr(tgt)`); **аргументите трябва да се lower-ват ПРЕДИ emit("call")** — иначе
   arg-инструкциите падат след call-а и x0/x1 получават garbage от scratch-регистрите.
+- **П3 ctors (obj3, проверено)**: конструкторите са **`Java.ConstructorDeclarator`** в отделен
+  список `cd.constructors` (НЕ в `declaredMethods`!), `name="<init>"`, `formalParameters`/
+  `statements` от `FunctionDeclarator`, чейнинг `this(...)` е **отделен поле**
+  `constructorInvocation` = `AlternateConstructorInvocation(arguments)` (НЕ стои в statements);
+  `super(...)` = `SuperConstructorInvocation` (не се поддържа — липсва наслеждаване). Символи:
+  `Foo_init`/`Foo_init_i32` (0-арг: `Foo_init`). `new Foo(args)` → alloc_obj+st_hdr, после
+  `resolveSig(cs, args)` по `classMethods["Foo::<init>"]` → call с args=[obj, args...], методът
+  връща obj; ако класът няма ctor и args=0 → само alloc (arena-та е zeroed). Ctor тялото ползва
+  bare fields / `this.x` (вече работещо от methods-милстона). В cls() всички методи/ctor-и минават
+  през общ `buildSig/matchSig` (match по arity+java типове, НЕ get(0)).
+- **void return (bugfix, ВАЖНО)**: преди `emit("return","void", null)` за void функции създаваше
+  **фантомен null arg** (Reader/Writer асign-ваше му id → `mov x0, w9`, operand mismatch). Сега:
+  (1) frontend `return void` ЕМИТИРА без args; (2) `Ir.Reader` оставя `return` **гол**
+  (`"return"`, без suffix) за функции с `retType==void` (иначе `RETURN_i32` с 0 args → "no rule
+  matches"); (3) SsaLower guard същия: void → стар `"return"`; (4) **нови rule-и
+  `emit return()`** в arm.rule (`b ${exit}`) и x86.rule (`jmp ${exit}`).
+  Мантика: `Reader` double-suffixing-а `return` при всеки re-read беше скрит източник на бъгове.
 - `javaTypeOf`/`inferType` за MethodInvocation: `concat`→`"String"`/`"ptr"` (иначе println
   ще вземе `k_println_i32`); `equals`→`"int"`/`"i32"`; P3: клас-методи → resolved `retJt`.
   `AmbigName` с >1 ids: само `identifiers[1]=="length"` дава int; всяко друго връща типа на
@@ -185,9 +204,10 @@ P3 methods + overloads е **завършен** → следващите P3 по�
 
 ## Testing
 
-- `cd /tmp/opencode && bash run_tests.sh` → build + 20 теста; текущ резултат **20/20**.
+- `cd /tmp/opencode && bash run_tests.sh` → build + 21 теста; текущ резултат **21/21**.
+  (Може да отнеме >2 мин — таймаут-ът на bash tool трябва да е ~400s.)
 - Тест функции: `run name src exitcode`, `run_out name src exitcode $'expected\nout\n'`;
-  добавяне на нов пример = `run_out obj2 "$DIR/examples/obj2.mj" 10 $'6\n7\n7\n17\n117\n7\n14\n8\n'`
+  добавяне на нов пример = `run_out obj3 "$DIR/examples/obj3.mj" 26 $'3\n30\n10\n20\n5\n6\n100\n15\n'`
   + обновяват се броя и README/ROADMAP/CONTEXT.
 - Примерни файлове за multi-D: `examples/md.mj`. OOB multi-D (m7/m8 .mj в /tmp/opencode) → exit 134.
 - Отделни минимални програми за бисouter (m1..m8.mj) стоят в /tmp/opencode; не се комитват.
@@ -199,19 +219,22 @@ P3 methods + overloads е **завършен** → следващите P3 по�
   System.out dispatch/String-methods dispatch;
   **P3: collectClass/invoke0/irType/fieldAddr/fieldAddrFrom/fieldThis (FieldAddr)/
   NewClassInstance→alloc_obj+st_hdr/object-field read+write; methods: MethSig + classMethods DB,
-  method mangling + скрит `this` param 0, classSigs/static-call dispatch, resolveSig overloads,
-  bare-name scan, javaTypeOf class-method resolution**).
+  methods: MethSig + classMethods DB, method mangling + скрит `this` param 0, classSigs/static-call
+  dispatch, resolveSig overloads, bare-name scan, javaTypeOf class-method resolution;
+  ctors: cd.constructors (ConstructorDeclarator), ctorSym `Foo_init*`, this(...)-chaining via
+  constructorInvocation, NewClassInstance ctor call, void-return без args**).
 - `common/Emitter.java` — spill support (spillTemp/spillBytes/stemp/slotMem/spillLoad/spillStore/
   prepareSpills/saveSpills/maxSpillBytes), x86 ptr→movq, template interpreter + Ctx.
 - `common/Regalloc.java` — linear scan + preassign, loop/phi/void liveness, "stack -N" locs.
+- `common/Ir.java` — Writer/Reader; **void `return` остава гол** (не `RETURN_<s>`).
 - `common/RuleParser.java` — rule v2 parser (Rules.width/isFpType).
 - `rules/arm.rule`, `rules/x86.rule` — include `alloc_i32/i64/f64/ptr`/`alloc_obj`, `st_hdr`, `len`,
   `chk`, `lea_i32/i64/f64/ptr`/`lea_field`, `ld_i32/i64/f64/ptr`, `st_i32/i64/f64/ptr`,
-  CONST/MOV/ADD/…, prologue/epilogue.
+  CONST/MOV/ADD/…, **`return` (void)**, prologue/epilogue.
 - `runtime/runtime.c`, `runtime/crt0.S` — k_* helpers (`k_print/k_println`, `k_print_i32/
   k_println_i32`, `k_newline`, **`k_string_equals`/`k_string_concat`**), mm_alloc, syscalls.
 - `examples/*.mj` — hello, gcd, fib, forloop, dowhile, ternary, switch, print, dbl, lng, mix,
-  arrays, oob, str, str2, md, str3, obj, **obj2**, native.
+  arrays, oob, str, str2, md, str3, obj, obj2, **obj3**, native.
 - `/tmp/opencode/run_tests.sh` — regression harness.
 - `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD/SE/**OProbe**/OProbe2/OProbe3) — Janino AST probes, преизползваеми.
 - `README.md`, `docs/ROADMAP.md`, `docs/ir-format.md`, `docs/rule-format.md`, `docs/corelib.md`.

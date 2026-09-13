@@ -241,6 +241,9 @@ emit RETURN_i32(v) {
     mov ${ret}, ${v}
     b ${exit}
 }
+emit return() {
+    b ${exit}
+}
 emit RETURN_i64(v) {
     mov ${ret}, ${v}
     b ${exit}

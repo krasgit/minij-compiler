@@ -36,7 +36,7 @@ public class SsaLowerMain {
             else if (o.equals("or"))  v.op = "OR_" + s;
             else if (o.equals("jump")) v.op = "JMP";
             else if (o.equals("branch")) v.op = "BRANCH";
-            else if (o.equals("return")) v.op = "RETURN_" + s;
+            else if (o.equals("return")) { if (f.retType.equals("void")) v.op = "return"; else v.op = "RETURN_" + s; }
             else if (o.equals("phi")) v.op = "PHI_" + s;
             else if (o.equals("const")) v.op = "CONST_" + s;
             else if (o.equals("param")) v.op = "PARAM_" + s;

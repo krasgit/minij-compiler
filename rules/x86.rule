@@ -304,6 +304,9 @@ emit RETURN_i32(v) {
     movl ${v}, ${ret}
     jmp ${exit}
 }
+emit return() {
+    jmp ${exit}
+}
 emit RETURN_i64(v) {
     movq ${v}, ${ret}
     jmp ${exit}
