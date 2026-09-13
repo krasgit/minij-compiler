@@ -93,12 +93,13 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **19/19 теста на arm64**
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **20/20 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
 str3 `1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1` (String equals/concat),
-obj `5/7/6/12`, `1/2/3/1`, exit 2 (P3 classes); всеки — exit code + stdout чек).
+obj `5/7/6/12`, `1/2/3/1`, exit 2 (P3 classes),
+obj2 `6/7/7/17/117`, `7/14/8`, exit 10 (P3 methods/overloads); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -134,6 +135,18 @@ aligned по тип (i32→4, i64/f64/ptr→8), total size в `classSizes`. `new
 `ld_ptr` за дълги вериги като `h.next.next.v`) и `ld_<ft>`/`st_<ft>`. `Foo[]` — `elemOf` дава
 `ptr` клетки. Layout-ът се смята в `collectClass` (pre-pass преди lowering), така че класовете се
 позовават свободно и напред. Методи/виртуални dispatch-и — следващата P3 част. Пример `examples/obj.mj`.
+
+### Обекти / класове (P3, методи + overloads)
+
+Instance-методи `obj.method(args)` и static `Class.method(args)`: `cls()` гради сигнатурен DB
+(`MethSig` в `classMethods: "cls::name" → List` за overloads), символите се мантлират
+`<cls>_<name>_<irparams>` (единствено `main` остава `main`); instance методите получават скрит
+`this` param 0 (`ptr`), който първи попада в argreg x0. `this.method()` / `this.field` и bare
+`field` в instance метод минават през `allocaOf["this"]`. Overload резолюция по arity + inferType
+exact match (`resolveSig`). Native `puti`/`println`/System.out и String equals/concat dispatch-ът
+са незасегнати — bare-name повиквания на потребителски static методи (напр. `half(3)`) се
+резолвират във втория dispatch pass. Пример `examples/obj2.mj` (Counter с `inc()`/`sum()` overloads/
+static `make`, cross-class `Util.twice` → `6/7/7/17/117`, `7/14/8`, exit 10).
 
 ## Пътна карта
 

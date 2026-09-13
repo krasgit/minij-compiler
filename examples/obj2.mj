@@ -1,0 +1,40 @@
+class Util {
+    static int twice(int v) {
+        return v * 2;
+    }
+}
+class Counter {
+    int n;
+    int inc() {
+        n = n + 1;
+        return this.n;
+    }
+    int sum() {
+        return n;
+    }
+    int sum(int a) {
+        return n + a;
+    }
+    int sum(int a, int b) {
+        return n + a + b;
+    }
+    static Counter make(int start) {
+        Counter c = new Counter();
+        c.n = start;
+        return c;
+    }
+    static int main() {
+        Counter c = new Counter();
+        c.n = 5;
+        puti(c.inc());
+        puti(c.inc());
+        puti(c.sum());
+        puti(c.sum(10));
+        puti(c.sum(10, 100));
+        Counter d = Counter.make(7);
+        puti(d.n);
+        puti(Util.twice(d.n));
+        puti(d.inc());
+        return c.sum(1, 2);
+    }
+}

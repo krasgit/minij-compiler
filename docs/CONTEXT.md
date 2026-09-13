@@ -45,36 +45,36 @@ regression + docs + commit + push.
   `824824d` P2 arrays → `b5f2736` P2 String/char/System.out →
   `e89d6f4` P2 multi-D arrays + stack spill → `a094239` docs/CONTEXT.md →
   `b9e3499` P2 String.equals/concat → `7840f2c` docs CONTEXT HEAD →
-  **`081e7a2` P3 classes: fields+new+access (HEAD, pushed)**.
+  `081e7a2` P3 classes: fields+new+access → `da04822` docs → **P3 methods+overloads (next)**.
 
-## Status (актуално към HEAD = 081e7a2)
+## Status (актуално към HEAD = da04822)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
-  (18/18 regression — str3.mj)**; **P3 classes: fields+new+access (19/19 — obj.mj)**.
-- ACTIVE: P3 в ход — първата част (полета/new/достъп) е приключена; следват методи/overloads,
-  конструктори/`this`, `instanceof`/cast, vtable (виж NEXT MOVE).
-- Regression: **19/19 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+  (18/18 regression — str3.mj)**; **P3 classes: fields+new+access (19/19 — obj.mj)**;
+  **P3 methods + overloads (20/20 — obj2.mj: instance/static/this/overloads, mangled symbols)**.
+- ACTIVE: P3 в ход — методи/overloads приключени; следват конструктори/`this` в аргументи,
+  `instanceof`/cast, vtable (виж NEXT MOVE).
+- Regression: **20/20 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
   str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
-  **obj** (`5/7/6/12`, `1/2/3/1`, exit 2).
+  **obj** (`5/7/6/12`, `1/2/3/1`, exit 2),
+  **obj2** (`6/7/7/17/117`, `7/14/8`, exit 10).
 
 ## NEXT MOVE (при "continue")
 
-P3 classes (fields+new+access) е **завършен** → следващите P3 под-милстони, по реда:
-1. **P3 методи + overloads (диспеч пръв път без vtable)** — instance-методи на класове,
-   разграничаване от native/String системните; `mi.target` ще бъде `AmbigName[obj, метод]`
-   (като String.identical model) — receiver стойността вече я имаме през `fieldAddr`-логиката.
-   Логиката от `MethodInvocation` String-детекцията може да се генерализира към класове.
-2. **P3 конструктори с аргументи + `this`** — `NewClassInstance.arguments` → извикване на
-   ctor метода след `alloc_obj`, `this` = параметър 0.
-3. **P3 vtable dispatch / наследяване, `instanceof`/cast** — class index → vtable, Regalloc/
+P3 methods + overloads е **завършен** → следващите P3 под-милстони, по реда:
+1. **P3 конструктори с аргументи + `this` изрично** — `NewClassInstance.arguments` (напр.
+   `new Counter(5)`) → alloc_obj + извикване на ctor (символ `Foo_Foo_...`), `this` = param 0
+   (още ГОТОВО от methods-милстона — scand вcls()); разграничаване ctor от обикновен метод
+   (по име == клас), при липса на дефиниран ctor → 0-арг като сега.
+2. **P3 vtable dispatch / наследяване, `instanceof`/cast** — class index → vtable, Regalloc/
    Emitter усложнение (N+1 hit от ROADMAP).
-4. Static полета/методи, `Foo[]` (cells=ptr, вече готово в `elemOf`).
+3. Static полета/методи (call вече е готов; static ПОЛЕТА остават), `Foo[]` (cells=ptr, готово в `elemOf`).
 
 Проучване преди кода: probe файлове в `/tmp/opencode` (OProbe/OProbe2/OProbe3/SEProbe).
 Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `run_tests.sh`
-(19/19→N/N) → README/ROADMAP/CONTEXT → комит+push.
+(20/20→N/N) → README/ROADMAP/CONTEXT → комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
 
@@ -104,9 +104,31 @@ P3 classes (fields+new+access) е **завършен** → следващите 
   (иначе `expr(tgt)`); **аргументите трябва да се lower-ват ПРЕДИ emit("call")** — иначе
   arg-инструкциите падат след call-а и x0/x1 получават garbage от scratch-регистрите.
 - `javaTypeOf`/`inferType` за MethodInvocation: `concat`→`"String"`/`"ptr"` (иначе println
-  ще вземе `k_println_i32`); `equals`→`"int"`/`"i32"`. `AmbigName` с >1 ids: само
-  `identifiers[1]=="length"` дава int; всяко друго връща типа на receiver-а (`s.equals` се
-  типизира като "String") — пълният `length>1 → int` чупи String dispatch-а.
+  ще вземе `k_println_i32`); `equals`→`"int"`/`"i32"`; P3: клас-методи → resolved `retJt`.
+  `AmbigName` с >1 ids: само `identifiers[1]=="length"` дава int; всяко друго връща типа на
+  receiver-а (`s.equals` се типизира като "String") — пълният `length>1 → int` чупи String
+  dispatch-а; `FieldAccessExpression` → javaTipo на полето (classFields lookup);
+  `ThisReference` → varJType["this"].
+**П3 methods shapes (obj2, проверено)**: `p.add(1,2)` → `MethodInvocation(methodName, argument,
+  target=AmbigName [p, add])`; `this.n` → **`Java.FieldAccessExpression`** (не AmbigName — `this`
+  е primary), поле = `fieldName`, lhs=`ThisReference`; bare `n` (в instance метод) = AmbigName с 1 id.
+  Static call `Counter.make(7)` → target AmbigName [Counter, make]. Приеман `this.add()` също
+  AmbigName [this, add]. `inc()` cto `static int main()` в клас → target=null → bare-name scan.
+- **П3 method sig DB (frontend)**: `MethSig{cn,name,symbol,retIr,retJt,pjts[],pirs[],isStatic}` в
+  `classMethods Map "cls::name" → List<MethSig>` (overloads). Symbol mangling:
+  `cn_name_<irparams>` (напр. `Counter_sum_i32_i32`, `main` остава "main"). Instance методите
+  имат **скрит `this` param 0** (`f.params[0]={"this","ptr"}`, `varJType["this"]=cn`) — CALL_ rule
+  потегля от argreg 0, работи без Emitter промени. Overload resolution = `resolveSig` по arity +
+  inferType-на арг. exact match, fallback първия с arity.
+- Dispatch ред в `expr()` MethodInvocation: (1) String equals/concat, (2) **classSigs** — за
+  `AmbigName[ClassName,m]` (static) и `javaTypeOf(tgt)==клас` (instance, receiver=`recvValue(mi,tgt)`
+  = load от alloca на ids[0] / expr(tgt)), (3) System.out, (4) **bare-name scan** по всички
+  `classMethods` keys (`::name` суфикс; half/dash/repeat са User static методи) — иначе native mangle.
+  Манткироването на символа изисква sig-ът във втората cls() итерация да се match-не към конретния
+  MethodDeclarator (по arity+jt), НЕ `list.get(0)` (3 overload-а sum → троен dup bug).
+- **`this`/FieldAccess баre-fallbacks**: експr бележи field read `this.n`/`d.n` (FieldAccess →
+  `fieldAddrFrom(base,nm)` — load alloca за this/locals, expr(base) за др., + lea_field+ld); bare
+  име в instance метод fallback `fieldThis(nm)`; `handleAssign` — същите два пътя + FieldAccess lhs.
 
 ### Типове / layout
 - **P3 object layout**: обект = 8-byte header (class index + pad/GC), полета от +8, aligned по тип
@@ -162,9 +184,9 @@ P3 classes (fields+new+access) е **завършен** → следващите 
 
 ## Testing
 
-- `cd /tmp/opencode && bash run_tests.sh` → build + 19 теста; текущ резултат **19/19**.
+- `cd /tmp/opencode && bash run_tests.sh` → build + 20 теста; текущ резултат **20/20**.
 - Тест функции: `run name src exitcode`, `run_out name src exitcode $'expected\nout\n'`;
-  добавяне на нов пример = `run_out obj "$DIR/examples/obj.mj" 2 $'5\n7\n6\n12\n1\n2\n3\n1\n'`
+  добавяне на нов пример = `run_out obj2 "$DIR/examples/obj2.mj" 10 $'6\n7\n7\n17\n117\n7\n14\n8\n'`
   + обновяват се броя и README/ROADMAP/CONTEXT.
 - Примерни файлове за multi-D: `examples/md.mj`. OOB multi-D (m7/m8 .mj в /tmp/opencode) → exit 134.
 - Отделни минимални програми за бисouter (m1..m8.mj) стоят в /tmp/opencode; не се комитват.
@@ -173,8 +195,11 @@ P3 classes (fields+new+access) е **завършен** → следващите 
 
 - `tools/ast-lower/AstLowerMain.java` — frontend (mapType/elemOf/elemOfAccess/javaTypeOf/varJType/
   methodRetJt/newArray2D/NewArray rewrite/FieldAccessExpression.length/inferType/decodeString/
-  System.out dispatch/String-methods dispatch; **P3: collectClass/invoke0/irType/fieldAddr (FieldAddr
-  = addr+ir+javaType)/NewClassInstance→alloc_obj+st_hdr/object-field read+write**; varElem е премахнат).
+  System.out dispatch/String-methods dispatch;
+  **P3: collectClass/invoke0/irType/fieldAddr/fieldAddrFrom/fieldThis (FieldAddr)/
+  NewClassInstance→alloc_obj+st_hdr/object-field read+write; methods: MethSig + classMethods DB,
+  method mangling + скрит `this` param 0, classSigs/static-call dispatch, resolveSig overloads,
+  bare-name scan, javaTypeOf class-method resolution**).
 - `common/Emitter.java` — spill support (spillTemp/spillBytes/stemp/slotMem/spillLoad/spillStore/
   prepareSpills/saveSpills/maxSpillBytes), x86 ptr→movq, template interpreter + Ctx.
 - `common/Regalloc.java` — linear scan + preassign, loop/phi/void liveness, "stack -N" locs.
@@ -185,7 +210,7 @@ P3 classes (fields+new+access) е **завършен** → следващите 
 - `runtime/runtime.c`, `runtime/crt0.S` — k_* helpers (`k_print/k_println`, `k_print_i32/
   k_println_i32`, `k_newline`, **`k_string_equals`/`k_string_concat`**), mm_alloc, syscalls.
 - `examples/*.mj` — hello, gcd, fib, forloop, dowhile, ternary, switch, print, dbl, lng, mix,
-  arrays, oob, str, str2, md, str3, **obj**, native.
+  arrays, oob, str, str2, md, str3, obj, **obj2**, native.
 - `/tmp/opencode/run_tests.sh` — regression harness.
 - `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD/SE/**OProbe**/OProbe2/OProbe3) — Janino AST probes, преизползваеми.
 - `README.md`, `docs/ROADMAP.md`, `docs/ir-format.md`, `docs/rule-format.md`, `docs/corelib.md`.

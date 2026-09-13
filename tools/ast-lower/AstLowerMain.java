@@ -17,6 +17,8 @@ public class AstLowerMain {
     Map<String, Integer> classIndex = new LinkedHashMap<>();      // className → малко int (в header-а)
     Map<String, Integer> classSizes = new LinkedHashMap<>();      // className → общ byte size с header
     Map<String, Map<String, Object[]>> classFields = new LinkedHashMap<>(); // className → field → {irType, byteOffset, javaType}
+    Map<String, List<MethSig>> classMethods = new LinkedHashMap<>(); // "cls::name" → сигнатури (overloads)
+    String curClass = null;                                       // текущия клас на lowering (инстанс методи); null = static/native
     Deque<Ir.Block> breaks = new ArrayDeque<>(), conts = new ArrayDeque<>();
     int dbgSeq = 1;
 
@@ -168,9 +170,29 @@ public class AstLowerMain {
         if (e instanceof Java.UnaryOperation u) return u.operator.equals("!") ? "boolean" : javaTypeOf(u.operand);
         if (e instanceof Java.MethodInvocation mi) {
             if (mi.methodName.equals("concat")) return "String";
+            Java.Rvalue tgt = (Java.Rvalue) get(mi, "target");
+            if (tgt != null) {
+                boolean[] sc = { false };
+                List<MethSig> sigs = classSigs(mi, sc);
+                if (sigs != null && !sigs.isEmpty()) {
+                    MethSig ms = resolveSig(sigs, mi.arguments);
+                    if (ms != null && ms.retJt != null) return ms.retJt;
+                }
+            }
             String r = methodRetJt.get(mi.methodName); return r == null ? "int" : r;
         }
-        if (e instanceof Java.FieldAccessExpression fa) { Object lh = get(fa, "lhs"); return lh instanceof Java.Rvalue lv ? javaTypeOf(lv) : "int"; }
+        if (e instanceof Java.FieldAccessExpression fa) {
+            String nm = getStr(fa, "fieldName");
+            if (nm != null && nm.equals("length")) return "int";
+            Object lh = get(fa, "lhs");
+            if (lh instanceof Java.Rvalue lv) {
+                String bt = javaTypeOf(lv);
+                Map<String, Object[]> fs = bt == null ? null : classFields.get(bt);
+                if (fs != null) { Object[] f = fs.get(nm); if (f != null) return (String) f[2]; }
+            }
+            return "int";
+        }
+        if (e instanceof Java.ThisReference) { String t = varJType.get("this"); return t == null ? "int" : t; }
         return "int";
     }
     static String wideJ(String a, String b) {
@@ -276,25 +298,70 @@ public class AstLowerMain {
         if (cn == null) cn = "T";
         for (Object mo : methods) {
             if (!(mo instanceof Java.MethodDeclarator md)) continue;
-            methodRet.put(md.name, irType(getStr(md, "type")));
-            methodRetJt.put(md.name, getStr(md, "type"));
+            String jt = getStr(md, "type");
+            methodRet.put(md.name, irType(jt));
+            methodRetJt.put(md.name, jt);
             if (md.isNative()) {
                 int ar = (md.formalParameters != null && md.formalParameters.parameters != null)
                         ? md.formalParameters.parameters.length : 0;
                 nativeMangle.put(md.name, "k_native_" + cn + "_" + md.name + "_" + ar);
+                continue;
             }
+            MethSig s = new MethSig();
+            s.cn = cn; s.name = md.name;
+            s.isStatic = methodStatic(md);
+            s.retIr = irType(jt); s.retJt = jt;
+            int ar = md.formalParameters != null && md.formalParameters.parameters != null
+                    ? md.formalParameters.parameters.length : 0;
+            s.pjts = new String[ar]; s.pirs = new String[ar];
+            for (int i = 0; i < ar; i++) {
+                Object fp = md.formalParameters.parameters[i];
+                if (fp instanceof Java.FunctionDeclarator.FormalParameter f) {
+                    s.pjts[i] = getStr(f, "type");
+                    s.pirs[i] = irType(s.pjts[i]);
+                }
+            }
+            if (md.name.equals("main")) s.symbol = "main";
+            else {
+                StringBuilder t = new StringBuilder();
+                for (String p : s.pirs) t.append('_').append(p);
+                s.symbol = cn + "_" + md.name + t;
+            }
+            classMethods.computeIfAbsent(cn + "::" + md.name, k -> new ArrayList<>()).add(s);
         }
         for (Object mo : methods) {
             if (!(mo instanceof Java.MethodDeclarator m)) continue;
             if (m.isNative()) continue;
-            method(m);
+            MethSig sig = null;
+            List<MethSig> ls = classMethods.get(cn + "::" + m.name);
+            if (ls != null && !ls.isEmpty()) {
+                int ar = m.formalParameters != null && m.formalParameters.parameters != null
+                        ? m.formalParameters.parameters.length : 0;
+                for (MethSig s : ls) {
+                    if (s.arity() != ar) continue;
+                    boolean ok = true;
+                    for (int i = 0; i < ar; i++) {
+                        Object fp = m.formalParameters.parameters[i];
+                        String fj = fp instanceof Java.FunctionDeclarator.FormalParameter f ? getStr(f, "type") : null;
+                        if (fj == null || !fj.equals(s.pjts[i])) { ok = false; break; }
+                    }
+                    if (ok) { sig = s; break; }
+                }
+            }
+            method(m, sig);
         }
     }
 
-    void method(Java.MethodDeclarator m) {
-        Ir.Func f = new Ir.Func(); f.name = m.name;
-        f.retType = irType(getStr(m, "type"));
+    void method(Java.MethodDeclarator m, MethSig sig) {
+        Ir.Func f = new Ir.Func();
+        f.name = sig != null ? sig.symbol : m.name;
+        f.retType = sig != null ? sig.retIr : irType(getStr(m, "type"));
         curFunc = f; allocaOf.clear(); varType.clear(); varJType.clear(); breaks.clear(); conts.clear();
+        curClass = sig != null ? sig.cn : null;
+        if (sig != null && !sig.isStatic) {
+            varJType.put("this", sig.cn);
+            f.params.add(new String[]{"this", "ptr"});
+        }
         for (Object p : m.formalParameters.parameters) {
             if (!(p instanceof Java.FunctionDeclarator.FormalParameter fp)) continue;
             String pt = irType(getStr(fp, "type"));
@@ -315,6 +382,7 @@ public class AstLowerMain {
         if (cur.term()==null || !Ir.isTerm(cur.term().op))
             emit("return","void", f.retType.equals("void") ? null : konst(0, f.retType.equals("void") ? "i32" : f.retType, -1));
         prog.funcs.add(f);
+        curClass = null;
     }
 
     void stmt(Java.BlockStatement s) {
@@ -485,9 +553,31 @@ public class AstLowerMain {
         }
         String name = null;
         if (a.lhs instanceof Java.AmbiguousName an) name = an.identifiers[0];
-        if (name == null) { System.err.println("# assign target unsupported"); return; }
+        if (name == null) {
+            if (a.lhs instanceof Java.FieldAccessExpression fe) {
+                String nm = getStr(fe, "fieldName");
+                Object lh = get(fe, "lhs");
+                if (lh instanceof Java.Rvalue lv) {
+                    FieldAddr f = fieldAddrFrom(lv, nm);
+                    if (f != null) {
+                        Ir.Value v = conv(expr(a.rhs), f.ir);
+                        Ir.Value st = emit("st_" + f.ir, "void", f.addr, v); st.dbg = tag(a);
+                        return;
+                    }
+                }
+            }
+            System.err.println("# assign target unsupported"); return;
+        }
         Ir.Value al = allocaOf.get(name);
-        if (al == null) { System.err.println("# undefined: " + name); return; }
+        if (al == null) {
+            FieldAddr ft = fieldThis(name);
+            if (ft != null) {
+                Ir.Value v = conv(expr(a.rhs), ft.ir);
+                Ir.Value st = emit("st_" + ft.ir, "void", ft.addr, v); st.dbg = tag(a);
+                return;
+            }
+            System.err.println("# undefined: " + name); return;
+        }
         Ir.Value v = conv(expr(a.rhs), varType.getOrDefault(name, al.type));
         Ir.Value st = emit("store","void",al,v); st.dbg = tag(a);
     }
@@ -524,6 +614,96 @@ public class AstLowerMain {
     }
 
     static class FieldAddr { Ir.Value addr; String ir; String jt; FieldAddr(Ir.Value a, String i, String j){addr=a; ir=i; jt=j;} }
+
+    static class MethSig {
+        String cn, name, symbol, retIr, retJt;
+        String[] pjts, pirs;
+        boolean isStatic;
+        int arity() { return pirs == null ? 0 : pirs.length; }
+    }
+
+    static boolean methodStatic(Java.MethodDeclarator md) {
+        for (Class<?> c = md.getClass(); c != null; c = c.getSuperclass()) {
+            try { Method mm = c.getDeclaredMethod("isStatic"); mm.setAccessible(true); return (Boolean) mm.invoke(md); }
+            catch (NoSuchMethodException e) {}
+            catch (Throwable t) { return false; }
+        }
+        return false;
+    }
+
+    /** Overload resolution: по arity, после exact тип match на аргументите (inferType),
+     *  fallback първият с тази arity. */
+    MethSig resolveSig(List<MethSig> sigs, Java.Rvalue[] args) {
+        int na = args == null ? 0 : args.length;
+        List<MethSig> byArity = new ArrayList<>();
+        for (MethSig s : sigs) if (s.arity() == na) byArity.add(s);
+        if (byArity.isEmpty()) return null;
+        if (byArity.size() == 1) return byArity.get(0);
+        for (MethSig s : byArity) {
+            boolean ok = true;
+            for (int i = 0; i < na; i++)
+                if (!s.pirs[i].equals(inferType(args[i], this))) { ok = false; break; }
+            if (ok) return s;
+        }
+        return byArity.get(0);
+    }
+
+    /** Дали MethodInvocation е apeл за метод на нашия клас (инстанса или static);
+     *  връща [<MethSig масива>] докато "по типа на receiver-а". */
+    List<MethSig> classSigs(Java.MethodInvocation mi, boolean[] staticCall) {
+        Java.Rvalue tgt = (Java.Rvalue) get(mi, "target");
+        if (tgt == null) { staticCall[0] = false; return null; }
+        //
+        if (tgt instanceof Java.AmbiguousName ta && ta.identifiers.length == 2
+                && classIndex.containsKey(ta.identifiers[0])) {
+            staticCall[0] = true;
+            return classMethods.get(ta.identifiers[0] + "::" + mi.methodName);
+        }
+        staticCall[0] = false;
+        String rj = javaTypeOf(tgt);
+        if (rj == null || !classIndex.containsKey(rj)) return null;
+        return classMethods.get(rj + "::" + mi.methodName);
+    }
+
+    /** Адрес на поле <name> от класа на израза <base> — за ThisReference/AmbigName
+     *  се load-ва alloca, за останали base-ове се използва стойността на израза. */
+    FieldAddr fieldAddrFrom(Java.Rvalue base, String nm) {
+        if (base == null || nm == null) return null;
+        String bj = javaTypeOf(base);
+        Map<String, Object[]> fs = bj == null || !classIndex.containsKey(bj) ? null : classFields.get(bj);
+        Object[] f = fs == null ? null : fs.get(nm);
+        if (f == null) return null;
+        Ir.Value v;
+        if (base instanceof Java.ThisReference) {
+            Ir.Value al = allocaOf.get("this");
+            if (al == null) return null;
+            v = emit("load", al.type, al); v.dbg = -1;
+        } else if (base instanceof Java.AmbiguousName an && an.identifiers.length == 1) {
+            Ir.Value al = allocaOf.get(an.identifiers[0]);
+            if (al == null) return null;
+            v = emit("load", al.type, al); v.dbg = -1;
+        } else {
+            v = expr(base);
+        }
+        Ir.Value o = konst((Integer) f[1], "i64", -1);
+        Ir.Value ad = emit("lea_field", "ptr", v, o); ad.dbg = -1;
+        return new FieldAddr(ad, (String) f[0], (String) f[2]);
+    }
+
+    /** Адрес на поле <name> от текущия клас (bare име в instance метод = this.<name>). */
+    FieldAddr fieldThis(String name) {
+        if (curClass == null) return null;
+        Map<String, Object[]> fs = classFields.get(curClass);
+        if (fs == null) return null;
+        Object[] f = fs.get(name);
+        if (f == null) return null;
+        Ir.Value al = allocaOf.get("this");
+        if (al == null) return null;
+        Ir.Value v = emit("load", al.type, al); v.dbg = -1;
+        Ir.Value o = konst((Integer) f[1], "i64", -1);
+        Ir.Value ad = emit("lea_field", "ptr", v, o); ad.dbg = -1;
+        return new FieldAddr(ad, (String) f[0], (String) f[2]);
+    }
 
     /** Резолвира верига `<var>.<fld>…` до АДРЕСА на последното поле: load-ва базовия
      *  указател на var-а и прекосява prefix-полетата с lea_field+ld_ptr. */
@@ -620,6 +800,8 @@ if (e == null) return konst(0, "i32", -1);
             String n = an.identifiers[0];
             Ir.Value al = allocaOf.get(n);
             if (al != null) { Ir.Value l = emit("load", al.type, al); l.dbg = tag(e); return l; }
+            FieldAddr ft = fieldThis(n);
+            if (ft != null) { Ir.Value l = emit("ld_" + ft.ir, ft.ir, ft.addr); l.dbg = tag(e); return l; }
             throw new RuntimeException("undefined: " + n);
         }
         if (e instanceof Java.NewClassInstance nci) {
@@ -671,6 +853,11 @@ if (e == null) return konst(0, "i32", -1);
                 Ir.Value b = expr((Java.Rvalue) lh);
                 Ir.Value l = emit("len", "i32", b); l.dbg = tag(e);
                 return l;
+            }
+            Object lh = get(fa, "lhs");
+            if (lh instanceof Java.Rvalue lv) {
+                FieldAddr fa2 = fieldAddrFrom(lv, nm);
+                if (fa2 != null) { Ir.Value l = emit("ld_" + fa2.ir, fa2.ir, fa2.addr); l.dbg = tag(e); return l; }
             }
             throw new RuntimeException("field access on non-array (fields unsupported): " + nm);
         }
@@ -731,6 +918,24 @@ if (e == null) return konst(0, "i32", -1);
                 call.dbg = tag(mi);
                 return call;
             }
+            // P3 class methods: instance (receiver) и static (ClassName.m)
+            boolean[] sc = { false };
+            List<MethSig> sigs = classSigs(mi, sc);
+            if (sigs != null && !sigs.isEmpty()) {
+                MethSig ms = resolveSig(sigs, mi.arguments);
+                if (ms == null) throw new RuntimeException("no matching overload for " + mi.methodName + " (" + mi.arguments.length + " args)");
+                List<Ir.Value> cargs = new ArrayList<>();
+                if (!ms.isStatic) cargs.add(recvValue(mi, tgt));
+                for (int i = 0; i < mi.arguments.length; i++)
+                    if (mi.arguments[i] != null)
+                        cargs.add(conv(expr(mi.arguments[i]), ms.pirs[i] == null ? "i32" : ms.pirs[i]));
+                String crt = ms.retIr == null ? "i32" : ms.retIr.equals("void") ? "i32" : ms.retIr;
+                Ir.Value call = emit("call", crt);
+                call.name = ms.symbol;
+                call.args.addAll(cargs);
+                call.dbg = tag(mi);
+                return call;
+            }
             boolean sysout = false;
             if (tgt instanceof Java.AmbiguousName tan) {
                 Object[] idsO = (Object[]) get(tan, "identifiers");
@@ -754,6 +959,23 @@ if (e == null) return konst(0, "i32", -1);
             }
             String rt = methodRet.getOrDefault(mi.methodName, "i32");
             if (rt.equals("void")) rt = "i32";
+            List<MethSig> msiglist = null;
+            for (Map.Entry<String, List<MethSig>> en : classMethods.entrySet())
+                if (en.getKey().endsWith("::" + mi.methodName)) { msiglist = en.getValue(); break; }
+            if (msiglist != null && !msiglist.isEmpty()) {
+                MethSig ms = resolveSig(msiglist, mi.arguments);
+                if (ms == null) throw new RuntimeException("no matching overload for " + mi.methodName + " (" + mi.arguments.length + " args)");
+                List<Ir.Value> cargs = new ArrayList<>();
+                for (int i = 0; i < mi.arguments.length; i++)
+                    if (mi.arguments[i] != null)
+                        cargs.add(conv(expr(mi.arguments[i]), ms.pirs[i] == null ? "i32" : ms.pirs[i]));
+                String crt = ms.retIr == null ? "i32" : ms.retIr.equals("void") ? "i32" : ms.retIr;
+                Ir.Value call = emit("call", crt);
+                call.name = ms.symbol;
+                call.args.addAll(cargs);
+                call.dbg = tag(mi);
+                return call;
+            }
             Ir.Value call = emit("call", rt);
             call.name = nativeMangle.getOrDefault(mi.methodName, mi.methodName);
             call.args.addAll(args);

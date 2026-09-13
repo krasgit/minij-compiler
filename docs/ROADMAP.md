@@ -106,8 +106,19 @@
 > (`h.next.next.v` — 4 ids), после `ld_<ft>`/`st_<ft>`. Типове: `irType`/`javaTypeOf`/
 > `inferType`/`elemOf` разпознават клас-имена → `ptr`. Regalloc/Emitter непроменени освен
 > новите ops. Пример `examples/obj.mj`; регресия **19/19 (arm64)**; x86 textual emit OK.
-> Остатък P3: конструктори с аргументи/`this`, методи + overloads, vtable dispatch,
-> `instanceof`/cast, наследяване, static полета/методи.
+> Остатък P3: конструктори с аргументи/`this`, vtable dispatch, `instanceof`/cast,
+> наследяване, static полета/методи.
+>
+> **P3 методи + overloads (DONE, пример `examples/obj2.mj`, регресия 20/20):** instance-методи
+> `obj.m(args)` + static `Cls.m(args)` диспеч без vtable. `cls()` гради `MethSig` DB в
+> `classMethods: "cls::name" → List<MethSig>` (overloads); символи `cls_name_<irparams>` (`main`
+> = "main"); instance методите имат скрит `this` param 0 (ptr, argreg x0). Overload резолюция
+> `resolveSig` (arity + inferType exact, fallback първия с arity); static call `Cls.make(7)` =
+> `target AmbigName[Cls, make]`, instance = `javaTypeOf(tgt)==клас`; `this.m()/this.f/bare f` през
+> `FieldAccessExpression`/`ThisReference`/bare-name fallbacks (`fieldAddrFrom`/`fieldThis`);
+> bare-name static user-calls (`half(3)`, `dash()`, `repeat(s)`) през втори bare-name scan;
+> native/String/System.out пътищата остават. Ключов bug: sig-match към конкретен declarator,
+> не `list.get(0)` (dup symbols при overloads).
 
 ## P3.5 — GC решение (слот)
 - **A)** Ръчен conservative mark&sweep (stack scan).
