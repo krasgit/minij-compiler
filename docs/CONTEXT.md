@@ -45,9 +45,10 @@ regression + docs + commit + push.
   `824824d` P2 arrays → `b5f2736` P2 String/char/System.out →
   `e89d6f4` P2 multi-D arrays + stack spill → `a094239` docs/CONTEXT.md →
   `b9e3499` P2 String.equals/concat → `7840f2c` docs CONTEXT HEAD →
-  `081e7a2` P3 classes: fields+new+access → `da04822` docs → **P3 methods+overloads (next)**.
+  `081e7a2` P3 classes: fields+new+access → `da04822` docs →
+  **`8f11393` P3 methods + overloads (HEAD, pushed)**.
 
-## Status (актуално към HEAD = da04822)
+## Status (актуално към HEAD = 8f11393)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
