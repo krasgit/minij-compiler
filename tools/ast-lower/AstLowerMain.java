@@ -159,6 +159,7 @@ public class AstLowerMain {
             return t == null ? "int" : t.toString();
         }
         if (e instanceof Java.Cast c) { String t = getStr(c, "targetType"); return t == null ? "int" : t; }
+        if (e instanceof Java.Instanceof) return "boolean";
         if (e instanceof Java.BooleanLiteral) return "boolean";
         if (e instanceof Java.CharacterLiteral) return "char";
         if (e instanceof Java.StringLiteral) return "String";
@@ -279,6 +280,7 @@ public class AstLowerMain {
         if (e instanceof Java.BinaryOperation b)
             return wide(inferType((Java.Rvalue) b.lhs, m), inferType((Java.Rvalue) b.rhs, m));
         if (e instanceof Java.Cast c) return mapType(getStr(c, "targetType"));
+        if (e instanceof Java.Instanceof) return "i32";
         if (e instanceof Java.NewClassInstance nci) return "ptr";
         if (e instanceof Java.UnaryOperation u)
             return u.operator.equals("!") ? "i32" : inferType(u.operand, m);
@@ -950,9 +952,60 @@ if (e == null) return konst(0, "i32", -1);
             }
             if (u.operator.equals("!")) { Ir.Value v = emit("cmpeq","i32",a,konst(0,"i32",tag(u))); v.dbg=tag(u); return v; }
         }
+        if (e instanceof Java.Instanceof io) {
+            String tc = getStr(io, "rhs");
+            if (!classIndex.containsKey(tc))
+                throw new RuntimeException("instanceof on unsupported type: " + tc);
+            int idx = classIndex.get(tc);
+            int id = dbgSeq++;
+            Ir.Value v = expr((Java.Rvalue) get(io, "lhs"));
+            Ir.Block z = new Ir.Block("io_z_" + id), n = new Ir.Block("io_n_" + id), j = new Ir.Block("io_j_" + id);
+            Ir.Value tmp = emit("alloca", "i32"); tmp.dbg = tag(io);
+            Ir.Value nz = emit("cmpeq", "i32", v, konst(0, "ptr", tag(io))); nz.dbg = tag(io);
+            emit("branch", "void", nz, blockRef(z), blockRef(n));
+            curFunc.blocks.add(z); cur = z;
+            emit("store", "void", tmp, konst(0, "i32", tag(io)));
+            emit("jump", "void", blockRef(j));
+            curFunc.blocks.add(n); cur = n;
+            Ir.Value ci = emit("ld_i32", "i32", v); ci.dbg = tag(io);
+            Ir.Value eq = emit("cmpeq", "i32", ci, konst(idx, "i32", tag(io))); eq.dbg = tag(io);
+            emit("store", "void", tmp, eq);
+            emit("jump", "void", blockRef(j));
+            curFunc.blocks.add(j); cur = j;
+            Ir.Value r = emit("load", "i32", tmp); r.dbg = tag(io);
+            return r;
+        }
         if (e instanceof Java.Cast c) {
+            String tc = getStr(c, "targetType");
+            if (classIndex.containsKey(tc)) {
+                Ir.Value v = expr((Java.Rvalue) get(c, "value"));
+                int idx = classIndex.get(tc);
+                int id = dbgSeq++;
+                Ir.Block z = new Ir.Block("cc_z_" + id), n = new Ir.Block("cc_n_" + id),
+                        o = new Ir.Block("cc_o_" + id), f = new Ir.Block("cc_f_" + id), j = new Ir.Block("cc_j_" + id);
+                Ir.Value tmp = emit("alloca", "ptr"); tmp.dbg = tag(c);
+                Ir.Value nz = emit("cmpeq", "i32", v, konst(0, "ptr", tag(c))); nz.dbg = tag(c);
+                emit("branch", "void", nz, blockRef(z), blockRef(n));
+                curFunc.blocks.add(z); cur = z;
+                emit("store", "void", tmp, konst(0, "ptr", tag(c)));
+                emit("jump", "void", blockRef(j));
+                curFunc.blocks.add(n); cur = n;
+                Ir.Value ci = emit("ld_i32", "i32", v); ci.dbg = tag(c);
+                Ir.Value eq = emit("cmpeq", "i32", ci, konst(idx, "i32", tag(c))); eq.dbg = tag(c);
+                Ir.Value no = emit("cmpeq", "i32", eq, konst(0, "i32", tag(c))); no.dbg = tag(c);
+                emit("branch", "void", no, blockRef(f), blockRef(o));
+                curFunc.blocks.add(o); cur = o;
+                emit("store", "void", tmp, v);
+                emit("jump", "void", blockRef(j));
+                curFunc.blocks.add(f); cur = f;
+                emit("store", "void", tmp, konst(0, "ptr", tag(c)));
+                emit("jump", "void", blockRef(j));
+                curFunc.blocks.add(j); cur = j;
+                Ir.Value r = emit("load", "ptr", tmp); r.dbg = tag(c);
+                return r;
+            }
             Ir.Value v = expr((Java.Rvalue) get(c, "value"));
-            return conv(v, mapType(getStr(c, "targetType")));
+            return conv(v, mapType(tc));
         }
         if (e instanceof Java.ConditionalExpression te) {
             Ir.Value c = expr(te.lhs);

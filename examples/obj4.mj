@@ -1,0 +1,25 @@
+class A {
+    int x;
+    A(int v) { x = v; }
+}
+class B {
+    int x;
+    B(int v) { x = v; }
+}
+class T {
+    static int main() {
+        A a = new A(7);
+        B b = new B(9);
+        puti(a instanceof A);
+        puti(b instanceof A);
+        puti(a instanceof B);
+        puti(b instanceof B);
+        A a2 = (A) a;
+        B b2 = (B) b;
+        puti(a2.x);
+        puti(b2.x);
+        B bad = (B) a;
+        puti(bad instanceof B);
+        return a2.x + b2.x;
+    }
+}

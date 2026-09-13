@@ -107,7 +107,7 @@
 > `inferType`/`elemOf` разпознават клас-имена → `ptr`. Regalloc/Emitter непроменени освен
 > новите ops. Пример `examples/obj.mj`; регресия **19/19 (arm64)**; x86 textual emit OK.
 > Регресия сега: **21/21 (arm64)** — obj, obj2, obj3 добавени.
-> Остатък P3: vtable dispatch, `instanceof`/cast, наследяване, static полета.
+> Остатък P3: наследяване/`extends` + `super(...)`, vtable dispatch, static полета.
 >
 > **P3 конструктори + `this` chaining (DONE, пример `examples/obj3.mj`, регресия 21/21):**
 > `new Foo(args)` → alloc_obj+st_hdr + call `Foo_init[<_irparams>]` ([obj, args…], overload
@@ -116,6 +116,13 @@
 > тялото с `[this, args…]`. Конструкторите са в `cd.constructors` (не `declaredMethods`).
 > Bugfix: void `return` без аргумент (Reader/SsaLower оставят `return` гол, нови rule-и `return()`
 > в arm.rule/x86.rule) — фантомния null arg даваше `mov x0, w9`.
+>
+> **P3 instanceof/cast (DONE, exact-class; пример `examples/obj4.mj`, регресия 22/22):**
+> header-ът е клас-индекс (i32) на offset 0 → `instanceof` = null-guard + `ld_i32` + `cmpeq(idx)`
+> (1/0); `(Foo) x` = null-guard + typecheck → x при съвпадение, null при несъвпадение. Subtype
+> семантика няма (чака vtable/наследяване). Попътни фиксове: **PhiElim пази phi-дефинициите**
+> (Emitter skip-ва PHI) — иначе ptr join-стойност губи типа → `mov w24, x20`; **ptr/address
+> CONST-i минават през литерал басейна** в `${imm}` — иначе `adrp x9, 0` → gas internal error.
 >
 > **P3 методи + overloads (DONE, пример `examples/obj2.mj`, регресия 20/20):** instance-методи
 > `obj.m(args)` + static `Cls.m(args)` диспеч без vtable. `cls()` гради `MethSig` DB в

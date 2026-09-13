@@ -6,9 +6,8 @@ public class PhiElim {
             for (Ir.Block b : f.blocks) byHash.put(b.hashCode(), b);
             Map<Ir.Block,List<Ir.Value>> inserts = new LinkedHashMap<>();
             for (Ir.Block b : f.blocks) {
-                List<Ir.Value> keep = new ArrayList<>();
                 for (Ir.Value v : b.ins) {
-                    if (!v.op.startsWith("PHI_") && !v.op.equals("phi")) { keep.add(v); continue; }
+                    if (!v.op.startsWith("PHI_") && !v.op.equals("phi")) continue;
                     for (int i = 0; i+1 < v.args.size(); i += 2) {
                         Ir.Value mk = v.args.get(i), val = v.args.get(i+1);
                         Ir.Block pred = null;
@@ -21,7 +20,6 @@ public class PhiElim {
                         inserts.computeIfAbsent(pred, k -> new ArrayList<>()).add(mov);
                     }
                 }
-                b.ins = keep;
             }
             for (var e : inserts.entrySet()) {
                 Ir.Block b = e.getKey();

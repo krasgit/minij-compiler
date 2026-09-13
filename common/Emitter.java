@@ -277,7 +277,7 @@ public class Emitter {
                 return reg(cx.v);
             case "imm":
                 if (cx == null) throw new RuntimeException("emit: ${imm} outside rule");
-                if (R.isFpType(cx.v.type) || cx.v.type.equals("i64")) return poolTag(cx.v);
+                if (R.isFpType(cx.v.type) || cx.v.type.equals("i64") || cx.v.type.equals("ptr") || cx.v.type.equals("address")) return poolTag(cx.v);
                 return Long.toString(cx.v.imm);
             case "imov":
                 if (cx == null) throw new RuntimeException("emit: ${imov} outside rule");

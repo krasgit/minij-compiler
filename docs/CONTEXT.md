@@ -47,38 +47,42 @@ regression + docs + commit + push.
   `b9e3499` P2 String.equals/concat → `7840f2c` docs CONTEXT HEAD →
   `081e7a2` P3 classes: fields+new+access → `da04822` docs →
   `8f11393` P3 methods + overloads → `16b46dc` docs →
-  **`27d0ac9` P3 конструктори + `this` chaining (HEAD, pushed)**.
+  `27d0ac9` P3 конструктори + `this` chaining → `e31e319` docs →
+  **P3 instanceof/cast (next)**.
 
-## Status (актуално към HEAD = 27d0ac9)
+## Status (актуално към HEAD = e31e319)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
   (18/18 regression — str3.mj)**; **P3 classes: fields+new+access (19/19 — obj.mj)**;
   **P3 methods + overloads (20/20 — obj2.mj)**;
-  **P3 конструктори с аргументи + `this` chaining (21/21 — obj3.mj)**.
-- ACTIVE: P3 в ход — конструктори/`this` приключени; следват `instanceof`/cast с наследяване,
-  vtable (виж NEXT MOVE).
-- Regression: **21/21 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+  **P3 конструктори с аргументи + `this` chaining (21/21 — obj3.mj)**;
+  **P3 instanceof/cast exact-class (22/22 — obj4.mj, HEAD е Pending перс комит)**.
+- ACTIVE: P3 в ход — instanceof/cast приключени; следват **наследяване (`extends`) + `super(...)`
+  + subtype instanceof/каст**, после vtable dispatch (виж NEXT MOVE).
+- Regression: **22/22 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
   str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
   **obj** (`5/7/6/12`, `1/2/3/1`, exit 2),
   **obj2** (`6/7/7/17/117`, `7/14/8`, exit 10),
-  **obj3** (`3/30/10/20`, `5/6/100/15`, exit 26).
+  **obj3** (`3/30/10/20`, `5/6/100/15`, exit 26),
+  **obj4** (`1/0/0/1`, `7/9/0`, exit 16).
 
 ## NEXT MOVE (при "continue")
 
-P3 конструктори + `this` chaining е **завършен** → следващите P3 под-милстони, по реда:
-1. **P3 `instanceof`/cast + наследяване (extends)** — обект header пази class index; `instanceof`
-   = сравняване на индекса (за сега без подтип-вериги), cast = typecheck (SIGABRT/0-af след
-   грешни). За наследяване: `extendedType` на `NamedClassDeclaration` → super = клас (проблемът е
-   `classMethods`/`classFields` ключове и скрит super-call `SuperConstructorInvocation` в ctor-ите).
-2. **P3 vtable dispatch / виртуални методи** — class index → vtable (N+1 hit от ROADMAP),
-   `accept`-без subclass-се например, dynamic dispatch на методи по името.
+P3 instanceof/cast (exact-class) е **завършен** → следващите P3 под-милстони, по реда:
+1. **P3 наследяване (`extends`) + `super(...)`** — `NamedClassDeclaration.extendedType`; super-клас
+   полетата/методите се наследяват (клас-хедер верeл + subtype `instanceof`/каст става walk по
+   super-веригата); ctor-ите първо `super(...)` (`SuperConstructorInvocation`) преди тялото.
+   `classMethods`/`classFields` ключове и размер на обектите (и super-полетата) трябва да се
+   преизчислят.
+2. **P3 vtable dispatch** — class index → vtable (N+1 hit от ROADMAP); виртуални методи
+   (`obj.m()` диспечва по динамичния клас).
 3. Static полета (call вече е готов; static ПОЛЕТА остават), `Foo[]` насочване + `foreach`? не.
 
 Проучване преди кода: probe файлове в `/tmp/opencode` (OProbe/OProbe2/OProbe3/CtorProbe/SEProbe).
 Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `run_tests.sh`
-(21/21→N/N) → README/ROADMAP/CONTEXT → комит+push.
+(22/22→N/N) → README/ROADMAP/CONTEXT → комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
 
