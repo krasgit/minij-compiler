@@ -48,10 +48,10 @@ regression + docs + commit + push.
   `081e7a2` P3 classes: fields+new+access → `da04822` docs →
   `8f11393` P3 methods + overloads → `16b46dc` docs →
   `27d0ac9` P3 конструктори + `this` chaining → `e31e319` docs →
-  `ed21fa3` P3 instanceof/cast exact-class (obj4) → `e90b0a4` docs.
-  **P3 extends/super/subtype (този комит, obj5 → следващата "docs" стъпка)**.
+  `ed21fa3` P3 instanceof/cast exact-class (obj4) → **`6f056f7` P3 extends/super/subtype
+  (този комит, obj5; docs са вкл).**
 
-## Status (актуално към HEAD = e90b0a4)
+## Status (актуално към HEAD = 6f056f7)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
