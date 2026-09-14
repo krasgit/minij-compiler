@@ -18,6 +18,9 @@ public class AstLowerMain {
     Map<String, Integer> classSizes = new LinkedHashMap<>();      // className → общ byte size с header
     Map<String, Map<String, Object[]>> classFields = new LinkedHashMap<>(); // className → field → {irType, byteOffset, javaType}
     Map<String, List<MethSig>> classMethods = new LinkedHashMap<>(); // "cls::name" → сигнатури (overloads)
+    Map<String, String> classSuper = new LinkedHashMap<>();       // className → superclassName (null за root)
+    Map<String, Java.ClassDeclaration> allDecls = new LinkedHashMap<>(); // className → декларация (за super-резолюция)
+    Set<String> visiting = new HashSet<>();                       // guard за cyclic extends
     String curClass = null;                                       // текущия клас на lowering (инстанс методи); null = static/native
     Deque<Ir.Block> breaks = new ArrayDeque<>(), conts = new ArrayDeque<>();
     int dbgSeq = 1;
@@ -33,10 +36,16 @@ public class AstLowerMain {
         List<?> types = (List<?>) get(cu, "packageMemberTypeDeclarations");
         if (types == null) types = (List<?>) get(cu, "types");
         if (types != null) for (Object td : types) {
+            if (td instanceof Java.ClassDeclaration cd) m.allDecls.put(getStr(cd, "name"), cd);
+        }
+        if (types != null) for (Object td : types) {
             if (td instanceof Java.ClassDeclaration cd) m.collectClass(cd);
         }
         if (types != null) for (Object td : types) {
-            if (td instanceof Java.ClassDeclaration cd) m.cls(cd);
+            if (td instanceof Java.ClassDeclaration cd) m.collectSigs(cd);
+        }
+        if (types != null) for (Object td : types) {
+            if (td instanceof Java.ClassDeclaration cd) m.emitMethods(cd);
         }
         String out = Ir.Writer.print(m.prog);
         if (args[1].equals("-")) System.out.print(out); else Files.writeString(Path.of(args[1]), out);
@@ -96,10 +105,29 @@ public class AstLowerMain {
     void collectClass(Java.ClassDeclaration cd) {
         String cn = getStr(cd, "name");
         if (cn == null || classIndex.containsKey(cn)) return;
+        Object ext = get(cd, "extendedType");
+        String superName = null;
+        if (ext != null) {
+            Object ids = get(ext, "identifiers");
+            if (ids instanceof Object[] arr && arr.length > 0) superName = String.valueOf(arr[arr.length - 1]);
+        }
+        Java.ClassDeclaration sup = superName == null ? null : allDecls.get(superName);
+        if (sup != null) {
+            if (visiting.contains(cn)) throw new RuntimeException("cyclic extends at class " + cn);
+            visiting.add(cn);
+            try { collectClass(sup); } finally { visiting.remove(cn); }
+        }
         int idx = classIndex.size();
         classIndex.put(cn, idx);
+        classSuper.put(cn, superName);
         int off = 8;
         Map<String, Object[]> fs = new LinkedHashMap<>();
+        if (superName != null) {
+            Map<String, Object[]> supf = classFields.get(superName);
+            if (supf != null) fs.putAll(supf);
+            Integer ss = classSizes.get(superName);
+            off = ss == null ? 8 : ss;
+        }
         Object members = invoke0(cd, "getVariableDeclaratorsAndInitializers");
         if (members instanceof List<?> ml) for (Object mb : ml) {
             if (!(mb instanceof Java.FieldDeclarationOrInitializer)) continue;
@@ -115,7 +143,10 @@ public class AstLowerMain {
                 off += a;
             }
         }
-        classSizes.put(cn, Math.max(16, (off + 7) & ~7));
+        int sz = Math.max(16, (off + 7) & ~7);
+        Integer ss = superName == null ? null : classSizes.get(superName);
+        if (ss != null) sz = Math.max(sz, ss);
+        classSizes.put(cn, sz);
         classFields.put(cn, fs);
     }
 
@@ -161,6 +192,7 @@ public class AstLowerMain {
         if (e instanceof Java.Cast c) { String t = getStr(c, "targetType"); return t == null ? "int" : t; }
         if (e instanceof Java.Instanceof) return "boolean";
         if (e instanceof Java.BooleanLiteral) return "boolean";
+        if (e instanceof Java.NullLiteral) return "null";
         if (e instanceof Java.CharacterLiteral) return "char";
         if (e instanceof Java.StringLiteral) return "String";
         if (e instanceof Java.IntegerLiteral lit)
@@ -240,13 +272,16 @@ public class AstLowerMain {
     static boolean isFp(String t)  { return t != null && t.equals("f64"); }
     static String wide(String a, String b) {
         if (isFp(a) || isFp(b)) return "f64";
-        if (a.equals("i64") || b.equals("i64")) return "i64";
+        if (isPtr(a) || isPtr(b) || a.equals("i64") || b.equals("i64")) return "i64";
         return "i32";
     }
+    static boolean isPtr(String t) { return t != null && (t.equals("ptr") || t.equals("address")); }
     /** Транспонира товар значение `v` към целития тип `to` (доколкото се налага). */
     Ir.Value conv(Ir.Value v, String to) {
         String from = v.type;
         if (from.equals(to)) return v;
+        if (isPtr(from) && to.equals("i64")) return v;      // ptr вече е 64-битов
+        if (isPtr(to) && isPtr(from)) return v;
         if (isFp(from) && isInt(to)) {
             Ir.Value c = to.equals("i64") ? emit("FTOI_64", "i64", v) : emit("FTOI", "i32", v);
             c.dbg = v.dbg; return c;
@@ -266,6 +301,7 @@ public class AstLowerMain {
         if (e instanceof Java.IntegerLiteral lit)
             return (lit.value.endsWith("L") || lit.value.endsWith("l")) ? "i64" : "i32";
         if (e instanceof Java.BooleanLiteral) return "i32";
+        if (e instanceof Java.NullLiteral) return "ptr";
         if (e instanceof Java.StringLiteral) return "ptr";
         if (e instanceof Java.FloatingPointLiteral) return "f64";
         if (e instanceof Java.AmbiguousName an) {
@@ -293,7 +329,9 @@ public class AstLowerMain {
         return "i32";
     }
 
-    void cls(Java.ClassDeclaration cd) {
+    /** Pre-pass: строим сигнатурната DB на ВСИЧКИ класове ПРЕДИ lowering (иначе super-клас
+     *  деклариран след наследника няма `::<init>`/методи по време на resolve). */
+    void collectSigs(Java.ClassDeclaration cd) {
         List<?> methods = getList(cd, "declaredMethods");
         List<?> cstrs = getList(cd, "constructors");
         if (methods == null) return;
@@ -319,6 +357,13 @@ public class AstLowerMain {
             s.retIr = "void"; s.retJt = "void"; s.isStatic = false;
             classMethods.computeIfAbsent(cn + "::<init>", k -> new ArrayList<>()).add(s);
         }
+    }
+
+    void emitMethods(Java.ClassDeclaration cd) {
+        List<?> methods = getList(cd, "declaredMethods");
+        List<?> cstrs = getList(cd, "constructors");
+        String cn = getStr(cd, "name");
+        if (cn == null) cn = "T";
         for (Object mo : methods) {
             if (!(mo instanceof Java.MethodDeclarator m)) continue;
             if (m.isNative()) continue;
@@ -415,25 +460,65 @@ public class AstLowerMain {
             Ir.Value pm = new Ir.Value("param", pt); pm.imm = i;
             Ir.Value st = emit("store","void",a,pm); st.dbg = a.dbg;
         }
-        // ctor chaining: this(args) преди тялото
-        if (m instanceof Java.ConstructorDeclarator cdf
-                && cdf.constructorInvocation instanceof Java.AlternateConstructorInvocation aci
-                && curClass != null) {
-            Java.Rvalue[] ciArgs = aci.arguments;
-            List<MethSig> cs = classMethods.get(curClass + "::<init>");
-            MethSig csig = cs == null ? null : resolveSig(cs, ciArgs);
-            if (csig == null) throw new RuntimeException("no matching constructor for this(...) in " + curClass);
-            List<Ir.Value> cargs = new ArrayList<>();
-            Ir.Value al = allocaOf.get("this");
-            Ir.Value th = emit("load", al.type, al); th.dbg = -1;
-            cargs.add(th);
-            for (int i = 0; i < ciArgs.length; i++)
-                if (ciArgs[i] != null)
-                    cargs.add(conv(expr(ciArgs[i]), csig.pirs[i] == null ? "i32" : csig.pirs[i]));
-            Ir.Value call = emit("call", "i32");
-            call.name = csig.symbol;
-            call.args.addAll(cargs);
-            call.dbg = -1;
+        // ctor chaining: this(...) / super(...) и имплицитния super(), преди тялото
+        if (m instanceof Java.ConstructorDeclarator cdf && curClass != null) {
+            Java.ConstructorInvocation ci = cdf.constructorInvocation;
+            if (ci instanceof Java.AlternateConstructorInvocation aci) {
+                Java.Rvalue[] ciArgs = aci.arguments;
+                List<MethSig> cs = classMethods.get(curClass + "::<init>");
+                MethSig csig = cs == null ? null : resolveSig(cs, ciArgs);
+                if (csig == null) throw new RuntimeException("no matching constructor for this(...) in " + curClass);
+                List<Ir.Value> cargs = new ArrayList<>();
+                Ir.Value al = allocaOf.get("this");
+                Ir.Value th = emit("load", al.type, al); th.dbg = -1;
+                cargs.add(th);
+                for (int i = 0; i < ciArgs.length; i++)
+                    if (ciArgs[i] != null)
+                        cargs.add(conv(expr(ciArgs[i]), csig.pirs[i] == null ? "i32" : csig.pirs[i]));
+                Ir.Value call = emit("call", "i32");
+                call.name = csig.symbol;
+                call.args.addAll(cargs);
+                call.dbg = -1;
+            } else if (ci == null) {
+                // имплицитен super() към 0-арг ctor на super-класа (ако съществува)
+                String scn = classSuper.get(curClass);
+                if (scn != null) {
+                    List<MethSig> cs = classMethods.get(scn + "::<init>");
+                    if (cs != null && !cs.isEmpty()) {
+                        MethSig csig = resolveSig(cs, new Java.Rvalue[0]);
+                        if (csig != null) {
+                            List<Ir.Value> cargs = new ArrayList<>();
+                            Ir.Value al = allocaOf.get("this");
+                            Ir.Value th = emit("load", al.type, al); th.dbg = -1;
+                            cargs.add(th);
+                            Ir.Value call = emit("call", "i32");
+                            call.name = csig.symbol;
+                            call.args.addAll(cargs);
+                            call.dbg = -1;
+                        }
+                    }
+                }
+            } else if (ci instanceof Java.SuperConstructorInvocation sci) {
+                String scn = classSuper.get(curClass);
+                if (scn != null) {
+                    List<MethSig> cs = classMethods.get(scn + "::<init>");
+                    MethSig csig = cs == null ? null : resolveSig(cs, sci.arguments);
+                    if (csig == null)
+                        throw new RuntimeException("no matching super constructor in " + scn + " for " + curClass
+                            + " (" + (sci.arguments == null ? 0 : sci.arguments.length) + " args)");
+                    List<Ir.Value> cargs = new ArrayList<>();
+                    Ir.Value al = allocaOf.get("this");
+                    Ir.Value th = emit("load", al.type, al); th.dbg = -1;
+                    cargs.add(th);
+                    for (int i = 0; i < sci.arguments.length; i++)
+                        if (sci.arguments[i] != null)
+                            cargs.add(conv(expr(sci.arguments[i]), csig.pirs[i] == null ? "i32" : csig.pirs[i]));
+                    Ir.Value call = emit("call", "i32");
+                    call.name = csig.symbol;
+                    call.args.addAll(cargs);
+                    call.dbg = -1;
+                }
+            }
         }
         for (Object s : m.statements) if (s instanceof Java.BlockStatement bs) stmt(bs);
         if (cur.term()==null || !Ir.isTerm(cur.term().op)) {
@@ -707,6 +792,14 @@ public class AstLowerMain {
         return byArity.get(0);
     }
 
+    /** Сигнатури на метод, търсени в <cls> и super-веригата му (наследени методи). */
+    List<MethSig> lookupMethod(String cls, String name) {
+        if (cls == null) return null;
+        List<MethSig> r = classMethods.get(cls + "::" + name);
+        if (r != null && !r.isEmpty()) return r;
+        return lookupMethod(classSuper.get(cls), name);
+    }
+
     /** Дали MethodInvocation е apeл за метод на нашия клас (инстанса или static);
      *  връща [<MethSig масива>] докато "по типа на receiver-а". */
     List<MethSig> classSigs(Java.MethodInvocation mi, boolean[] staticCall) {
@@ -716,12 +809,43 @@ public class AstLowerMain {
         if (tgt instanceof Java.AmbiguousName ta && ta.identifiers.length == 2
                 && classIndex.containsKey(ta.identifiers[0])) {
             staticCall[0] = true;
-            return classMethods.get(ta.identifiers[0] + "::" + mi.methodName);
+            return lookupMethod(ta.identifiers[0], mi.methodName);
         }
         staticCall[0] = false;
         String rj = javaTypeOf(tgt);
         if (rj == null || !classIndex.containsKey(rj)) return null;
-        return classMethods.get(rj + "::" + mi.methodName);
+        return lookupMethod(rj, mi.methodName);
+    }
+
+    /** Всички classIndex-и на класове, чиято super-верига включва <tc> (вкл. самия tc). */
+    List<Integer> subtypeIndexes(String tc) {
+        Integer ti = classIndex.get(tc);
+        List<Integer> res = new ArrayList<>();
+        if (ti == null) return res;
+        for (Map.Entry<String, Integer> e : classIndex.entrySet()) {
+            String c = e.getKey();
+            while (c != null) {
+                Integer ci = classIndex.get(c);
+                if (ci == null) break;
+                if (ci.equals(ti)) { res.add(e.getValue()); break; }
+                c = classSuper.get(c);
+            }
+        }
+        return res;
+    }
+
+    /** Subtype тест на динамичния клас index `ci`: 1/0 дали е <tc> или негов наследник.
+     *  Чист израз без control-flow: OR-верига от CMPEQ към всеки клас в subclass-затвора. */
+    Ir.Value subtypeTest(Ir.Value ci, String tc, int dbg) {
+        List<Integer> st = subtypeIndexes(tc);
+        if (st.isEmpty()) { Ir.Value z = konst(0, "i32", dbg); return z; }
+        Ir.Value r = null;
+        for (Integer k : st) {
+            Ir.Value eq = emit("cmpeq", "i32", ci, konst(k, "i32", dbg)); eq.dbg = dbg;
+            if (r == null) r = eq;
+            else { Ir.Value o = emit("or", "i32", r, eq); o.dbg = dbg; r = o; }
+        }
+        return r;
     }
 
     /** Адрес на поле <name> от класа на израза <base> — за ThisReference/AmbigName
@@ -819,6 +943,7 @@ if (e == null) return konst(0, "i32", -1);
         if (e instanceof Java.FloatingPointLiteral lit)
             return konst(Double.doubleToRawLongBits(Double.parseDouble(String.valueOf(get(lit, "value")))), "f64", tag(e));
         if (e instanceof Java.BooleanLiteral lit) return konst(lit.value.equals("true")?1:0, "i32", tag(e));
+        if (e instanceof Java.NullLiteral) return konst(0, "ptr", tag(e));
         if (e instanceof Java.CharacterLiteral cl) {
             Object cv = get(cl, "value");
             String cvs = cv == null ? "" : cv.toString();
@@ -956,7 +1081,6 @@ if (e == null) return konst(0, "i32", -1);
             String tc = getStr(io, "rhs");
             if (!classIndex.containsKey(tc))
                 throw new RuntimeException("instanceof on unsupported type: " + tc);
-            int idx = classIndex.get(tc);
             int id = dbgSeq++;
             Ir.Value v = expr((Java.Rvalue) get(io, "lhs"));
             Ir.Block z = new Ir.Block("io_z_" + id), n = new Ir.Block("io_n_" + id), j = new Ir.Block("io_j_" + id);
@@ -968,8 +1092,8 @@ if (e == null) return konst(0, "i32", -1);
             emit("jump", "void", blockRef(j));
             curFunc.blocks.add(n); cur = n;
             Ir.Value ci = emit("ld_i32", "i32", v); ci.dbg = tag(io);
-            Ir.Value eq = emit("cmpeq", "i32", ci, konst(idx, "i32", tag(io))); eq.dbg = tag(io);
-            emit("store", "void", tmp, eq);
+            Ir.Value sub = subtypeTest(ci, tc, tag(io));
+            emit("store", "void", tmp, sub);
             emit("jump", "void", blockRef(j));
             curFunc.blocks.add(j); cur = j;
             Ir.Value r = emit("load", "i32", tmp); r.dbg = tag(io);
@@ -979,7 +1103,6 @@ if (e == null) return konst(0, "i32", -1);
             String tc = getStr(c, "targetType");
             if (classIndex.containsKey(tc)) {
                 Ir.Value v = expr((Java.Rvalue) get(c, "value"));
-                int idx = classIndex.get(tc);
                 int id = dbgSeq++;
                 Ir.Block z = new Ir.Block("cc_z_" + id), n = new Ir.Block("cc_n_" + id),
                         o = new Ir.Block("cc_o_" + id), f = new Ir.Block("cc_f_" + id), j = new Ir.Block("cc_j_" + id);
@@ -991,8 +1114,8 @@ if (e == null) return konst(0, "i32", -1);
                 emit("jump", "void", blockRef(j));
                 curFunc.blocks.add(n); cur = n;
                 Ir.Value ci = emit("ld_i32", "i32", v); ci.dbg = tag(c);
-                Ir.Value eq = emit("cmpeq", "i32", ci, konst(idx, "i32", tag(c))); eq.dbg = tag(c);
-                Ir.Value no = emit("cmpeq", "i32", eq, konst(0, "i32", tag(c))); no.dbg = tag(c);
+                Ir.Value sub = subtypeTest(ci, tc, tag(c));
+                Ir.Value no = emit("cmpeq", "i32", sub, konst(0, "i32", tag(c))); no.dbg = tag(c);
                 emit("branch", "void", no, blockRef(f), blockRef(o));
                 curFunc.blocks.add(o); cur = o;
                 emit("store", "void", tmp, v);
@@ -1085,8 +1208,17 @@ if (e == null) return konst(0, "i32", -1);
             String rt = methodRet.getOrDefault(mi.methodName, "i32");
             if (rt.equals("void")) rt = "i32";
             List<MethSig> msiglist = null;
-            for (Map.Entry<String, List<MethSig>> en : classMethods.entrySet())
-                if (en.getKey().endsWith("::" + mi.methodName)) { msiglist = en.getValue(); break; }
+            if (curClass != null) {
+                String c = curClass;
+                while (c != null) {
+                    List<MethSig> r = classMethods.get(c + "::" + mi.methodName);
+                    if (r != null && !r.isEmpty()) { msiglist = r; break; }
+                    c = classSuper.get(c);
+                }
+            }
+            if (msiglist == null)
+                for (Map.Entry<String, List<MethSig>> en : classMethods.entrySet())
+                    if (en.getKey().endsWith("::" + mi.methodName)) { msiglist = en.getValue(); break; }
             if (msiglist != null && !msiglist.isEmpty()) {
                 MethSig ms = resolveSig(msiglist, mi.arguments);
                 if (ms == null) throw new RuntimeException("no matching overload for " + mi.methodName + " (" + mi.arguments.length + " args)");

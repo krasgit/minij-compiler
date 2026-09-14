@@ -106,8 +106,8 @@
 > (`h.next.next.v` — 4 ids), после `ld_<ft>`/`st_<ft>`. Типове: `irType`/`javaTypeOf`/
 > `inferType`/`elemOf` разпознават клас-имена → `ptr`. Regalloc/Emitter непроменени освен
 > новите ops. Пример `examples/obj.mj`; регресия **19/19 (arm64)**; x86 textual emit OK.
-> Регресия сега: **21/21 (arm64)** — obj, obj2, obj3 добавени.
-> Остатък P3: наследяване/`extends` + `super(...)`, vtable dispatch, static полета.
+> Регресия сега: **23/23 (arm64)** — obj, obj2, obj3, obj4, obj5 добавени.
+> Остатък P3: **vtable dispatch (+ override/`super`-calls)**, static полета.
 >
 > **P3 конструктори + `this` chaining (DONE, пример `examples/obj3.mj`, регресия 21/21):**
 > `new Foo(args)` → alloc_obj+st_hdr + call `Foo_init[<_irparams>]` ([obj, args…], overload
@@ -123,6 +123,18 @@
 > семантика няма (чака vtable/наследяване). Попътни фиксове: **PhiElim пази phi-дефинициите**
 > (Emitter skip-ва PHI) — иначе ptr join-стойност губи типа → `mov w24, x20`; **ptr/address
 > CONST-i минават през литерал басейна** в `${imm}` — иначе `adrp x9, 0` → gas internal error.
+>
+> **P3 наследяване `extends` + `super(...)` + subtype (DONE, пример `examples/obj5.mj`,
+> регресия 23/23):** три pre-pass-а (collectClass рекурсивно над super-а + cyclic guard,
+> collectSigs, emitMethods); subclass layout продължава от `classSizes[super]`, super-полетата се
+> копират на същите офсети; instance-методите се наследяват през `lookupMethod` (walk по
+> `classSuper`); ctor-ите викат `super(...)` (`SuperConstructorInvocation`) с `[this, args…]`
+> resolve по `super::<init>` (имплицитен `super()` ако липсва явен и суперкласът има 0-арг ctor).
+> `instanceof`/cast използват `subtypeTest` — рефлексивно-транзитивно затваряне по super,
+> едноблокова OR-верига (`cmpeq` + `or`); несъвместим cast → null. Попътни фиксове: **AND_i32/
+> OR_i32 rules** в arm/x86 (subtype веригата + `&&`/`||`); **Emitter.saveSpills** съхранява
+> 2-арг phi-move `MOV(val, phi)` със spill-нат phi в слота на phi-то. Диспечът остава статичен
+> (vtable/override = NEXT).
 >
 > **P3 методи + overloads (DONE, пример `examples/obj2.mj`, регресия 20/20):** instance-методи
 > `obj.m(args)` + static `Cls.m(args)` диспеч без vtable. `cls()` гради `MethSig` DB в

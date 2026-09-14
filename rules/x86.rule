@@ -133,6 +133,17 @@ emit NEG_f64(x) {
     subsd ${x}, $dst
 }
 
+emit AND_i32(x, y) {
+    movl ${x}, %eax
+    andl ${y}, %eax
+    movl %eax, $dst
+}
+emit OR_i32(x, y) {
+    movl ${x}, %eax
+    orl ${y}, %eax
+    movl %eax, $dst
+}
+
 emit CMPLT_i32(x, y) {
     movl ${x}, %eax
     cmpl ${y}, %eax

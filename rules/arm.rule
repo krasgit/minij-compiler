@@ -105,6 +105,13 @@ emit NEG_f64(x) {
     fneg $dst, ${x}
 }
 
+emit AND_i32(x, y) {
+    and $dst, ${x}, ${y}
+}
+emit OR_i32(x, y) {
+    orr $dst, ${x}, ${y}
+}
+
 emit CMPLT_i32(x, y) {
     cmp ${x}, ${y}
     cset $dst, lt

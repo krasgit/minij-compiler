@@ -48,41 +48,38 @@ regression + docs + commit + push.
   `081e7a2` P3 classes: fields+new+access → `da04822` docs →
   `8f11393` P3 methods + overloads → `16b46dc` docs →
   `27d0ac9` P3 конструктори + `this` chaining → `e31e319` docs →
-  **P3 instanceof/cast (next)**.
+  `ed21fa3` P3 instanceof/cast exact-class (obj4) → `e90b0a4` docs.
+  **P3 extends/super/subtype (този комит, obj5 → следващата "docs" стъпка)**.
 
-## Status (актуално към HEAD = e31e319)
+## Status (актуално към HEAD = e90b0a4)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
   (18/18 regression — str3.mj)**; **P3 classes: fields+new+access (19/19 — obj.mj)**;
   **P3 methods + overloads (20/20 — obj2.mj)**;
   **P3 конструктори с аргументи + `this` chaining (21/21 — obj3.mj)**;
-  **P3 instanceof/cast exact-class (22/22 — obj4.mj, HEAD е Pending перс комит)**.
-- ACTIVE: P3 в ход — instanceof/cast приключени; следват **наследяване (`extends`) + `super(...)`
-  + subtype instanceof/каст**, после vtable dispatch (виж NEXT MOVE).
-- Regression: **22/22 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+  **P3 instanceof/cast exact-class (22/22 — obj4.mj)**;
+  **P3 наследяване `extends` + `super(...)` + subtype instanceof/cast (23/23 — obj5.mj)**.
+- ACTIVE: P3 в ход — наследяването е готово; следва **P3 vtable dispatch** (виж NEXT MOVE).
+- Regression: **23/23 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
   str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
   **obj** (`5/7/6/12`, `1/2/3/1`, exit 2),
   **obj2** (`6/7/7/17/117`, `7/14/8`, exit 10),
   **obj3** (`3/30/10/20`, `5/6/100/15`, exit 26),
-  **obj4** (`1/0/0/1`, `7/9/0`, exit 16).
+  **obj4** (`1/0/0/1`, `7/9/0`, exit 16),
+  **obj5** (`15/7/1/1/0/1/7/7/2/1/4/0`, exit 77).
 
 ## NEXT MOVE (при "continue")
 
-P3 instanceof/cast (exact-class) е **завършен** → следващите P3 под-милстони, по реда:
-1. **P3 наследяване (`extends`) + `super(...)`** — `NamedClassDeclaration.extendedType`; super-клас
-   полетата/методите се наследяват (клас-хедер верeл + subtype `instanceof`/каст става walk по
-   super-веригата); ctor-ите първо `super(...)` (`SuperConstructorInvocation`) преди тялото.
-   `classMethods`/`classFields` ключове и размер на обектите (и super-полетата) трябва да се
-   преизчислят.
-2. **P3 vtable dispatch** — class index → vtable (N+1 hit от ROADMAP); виртуални методи
-   (`obj.m()` диспечва по динамичния клас).
-3. Static полета (call вече е готов; static ПОЛЕТА остават), `Foo[]` насочване + `foreach`? не.
+P3 extends/super/subtype е **завършен** → следващите P3 под-милстони, по реда:
+1. **P3 vtable dispatch** — class index → vtable (N+1 hit от ROADMAP); виртуални методи
+   (`obj.m()` диспечва по динамичния клас; override в подкласите).
+2. Static полета (call вече е готов; static ПОЛЕТА остават), `Foo[]` насочване + `foreach`? не.
 
 Проучване преди кода: probe файлове в `/tmp/opencode` (OProbe/OProbe2/OProbe3/CtorProbe/SEProbe).
 Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `run_tests.sh`
-(22/22→N/N) → README/ROADMAP/CONTEXT → комит+push.
+(23/23→N/N) → README/ROADMAP/CONTEXT → комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
 
@@ -115,7 +112,8 @@ P3 instanceof/cast (exact-class) е **завършен** → следващит�
   список `cd.constructors` (НЕ в `declaredMethods`!), `name="<init>"`, `formalParameters`/
   `statements` от `FunctionDeclarator`, чейнинг `this(...)` е **отделен поле**
   `constructorInvocation` = `AlternateConstructorInvocation(arguments)` (НЕ стои в statements);
-  `super(...)` = `SuperConstructorInvocation` (не се поддържа — липсва наслеждаване). Символи:
+  `super(...)` = `SuperConstructorInvocation` — поддържа се от P3 extends (resolve по super `::<init>`
+  sig-ове, args=[this, args...]; имплицитно `super()` ако няма явен). Символи:
   `Foo_init`/`Foo_init_i32` (0-арг: `Foo_init`). `new Foo(args)` → alloc_obj+st_hdr, после
   `resolveSig(cs, args)` по `classMethods["Foo::<init>"]` → call с args=[obj, args...], методът
   връща obj; ако класът няма ctor и args=0 → само alloc (arena-та е zeroed). Ctor тялото ползва
@@ -128,6 +126,31 @@ P3 instanceof/cast (exact-class) е **завършен** → следващит�
   matches"); (3) SsaLower guard същия: void → стар `"return"`; (4) **нови rule-и
   `emit return()`** в arm.rule (`b ${exit}`) и x86.rule (`jmp ${exit}`).
   Мантика: `Reader` double-suffixing-а `return` при всеки re-read беше скрит източник на бъгове.
+- **П3 наследяване `extends` + `super(...)` (obj5, проверено)**: `NamedClassDeclaration.extendedType`
+  е `Java.ReferenceType` c `identifiers=[Име]` (или null). Frontend dържи `classSuper (cls→super)` и
+  `allDecls (cls→decl)`; Main прави 3 pre-pass-a: `collectClass` (рекурсия в super-а ПЪРВО, цикличен
+  guard `visiting`) → `collectSigs` (метод DB за всички класове) → `emitMethods` (bodies). Layout:
+  подкласовите полета continue-ват OТ super-а: offset започва от `classSizes[super]`, super-полетата
+  се копират в subclass map-a на сЪщите offsets (съвместим header+field-layout). Символите остават
+  статични (`B_sum_i32_i32` на дълбочината, където са дефинирани). Инстанс-метод dispatch:
+  `lookupMethod(cls,name)` walk-ва `classSuper` веригата; bare-name скан предпочита super-веригата на
+  curClass преди glob-алния. Ctor чейнинг: `this(...)` (`AlternateConstructorInvocation`) и `super(...)`
+  (`SuperConstructorInvocation`, поле `constructorInvocation`); super-ctor-ът се resolve-ва по
+  `classMethods[super+"::<init>"]`, извиква се с args=[this, args...]; ако няма явен ctor-invocation и
+  super-класът има 0-арг ctor → имплицитно `super()`. `instanceof`/cast вече НЕ сравнява exact index:
+  `subtypeIndexes(tc)` = рефлексивно-транзитивно затваряне на sub по `classSuper`; `subtypeTest(ci, tc)`
+  = OR-верига от `cmpeq_i32`/`or_i32` за всеки индекс от затварянето (едноблокова, без control flow).
+  Cast до несъвместим тип → null (Java cast-семантика; obj5 проверява `nc != null ? 1 : 0`).
+  **Не се реализиран vtable/override dispatch** — статичен dispatch до момента (P3 vtable е next).
+- **Emitter spill bugfix (с този комит, ВАЖНО)**: `saveSpills` записваше обратно само РЕЗУЛТАТА на
+  инструкцията. Phi-move-ите от PhiElim са 2-арг `MOV_<s>(val, phiDst)` — dst (phi) стои в `args[1]`.
+  Ако phi-то е spill-нато, стойността оставаше в скретч-temp и се губи при jump-а (join-блокчето чете
+  stale slot → грешен резултат/непредвидимост). Фикс: в `saveSpills` за 2-арг MOV и spill-нат `args[1]`
+  → `spillStore(args[1])`. Не докосва 1-арг MOV/copy; 22/22 предишни тестове пак минават.
+- **Нови ALU rules (с този комит)**: `AND_i32`/`OR_i32` (SsaLower → `and`/`or`); arm64:
+  `and`/`orr $dst, ${x}, ${y}`; x86: `movl x→%eax; andl/orl y; movl %eax→dst`. Използват се от
+  subtype OR-веригата; освен това оформят `&&`/`||` операторите. Преди тях липсваха нулеви правила
+  → "no rule for op 'OR_i32'".
 - `javaTypeOf`/`inferType` за MethodInvocation: `concat`→`"String"`/`"ptr"` (иначе println
   ще вземе `k_println_i32`); `equals`→`"int"`/`"i32"`; P3: клас-методи → resolved `retJt`.
   `AmbigName` с >1 ids: само `identifiers[1]=="length"` дава int; всяко друго връща типа на
@@ -159,7 +182,9 @@ P3 instanceof/cast (exact-class) е **завършен** → следващит�
 - **P3 object layout**: обект = 8-byte header (class index + pad/GC), полета от +8, aligned по тип
   (i32→4, i64/f64/ptr→8); `collectClass` pre-pass строи `classIndex (className→int)`, `classSizes`
   (мин. 16, align 8), `classFields (cls → field → {irType, byteOff, javaType})` от всички типове
-  ПРЕДИ lowering (свободни препратки). Header index се записва с `st_hdr` (i32 const).
+  ПРЕДИ lowering (свободни препратки). С P3 extends: subclass `classFields` включва super-полетата
+  на сЪщите offsets, начален offset = `classSizes[super]` (първо super-ът се collect-ва рекурсивно).
+  Header index се записва с `st_hdr` (i32 const).
 - **Нови ops в P3**: `alloc_obj(size-i32)` (arm: sxtw x9→x0; mm_alloc; x86: movslq→%rdi) и
   `lea_field(base-ptr, off-i64 const)` (arm: `add dst, a, o` — и двата x-reg; x86: movq+addq).
   ЗАБЕЛЕЖКА: arm `mov x0, ${w-reg}` от i32 const НЕ валиден — винаги `sxtw x9, ${c}`.
@@ -209,7 +234,7 @@ P3 instanceof/cast (exact-class) е **завършен** → следващит�
 
 ## Testing
 
-- `cd /tmp/opencode && bash run_tests.sh` → build + 21 теста; текущ резултат **21/21**.
+- `cd /tmp/opencode && bash run_tests.sh` → build + 23 теста; текущ резултат **23/23**.
   (Може да отнеме >2 мин — таймаут-ът на bash tool трябва да е ~400s.)
 - Тест функции: `run name src exitcode`, `run_out name src exitcode $'expected\nout\n'`;
   добавяне на нов пример = `run_out obj3 "$DIR/examples/obj3.mj" 26 $'3\n30\n10\n20\n5\n6\n100\n15\n'`
@@ -239,7 +264,7 @@ P3 instanceof/cast (exact-class) е **завършен** → следващит�
 - `runtime/runtime.c`, `runtime/crt0.S` — k_* helpers (`k_print/k_println`, `k_print_i32/
   k_println_i32`, `k_newline`, **`k_string_equals`/`k_string_concat`**), mm_alloc, syscalls.
 - `examples/*.mj` — hello, gcd, fib, forloop, dowhile, ternary, switch, print, dbl, lng, mix,
-  arrays, oob, str, str2, md, str3, obj, obj2, **obj3**, native.
+  arrays, oob, str, str2, md, str3, obj, obj2, **obj3**, **obj4**, **obj5**, native.
 - `/tmp/opencode/run_tests.sh` — regression harness.
 - `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD/SE/**OProbe**/OProbe2/OProbe3) — Janino AST probes, преизползваеми.
 - `README.md`, `docs/ROADMAP.md`, `docs/ir-format.md`, `docs/rule-format.md`, `docs/corelib.md`.

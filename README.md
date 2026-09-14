@@ -93,7 +93,7 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **22/22 теста на arm64**
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **23/23 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
@@ -101,7 +101,8 @@ str3 `1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1` (String equals/concat),
 obj `5/7/6/12`, `1/2/3/1`, exit 2 (P3 classes),
 obj2 `6/7/7/17/117`, `7/14/8`, exit 10 (P3 methods/overloads),
 obj3 `3/30/10/20`, `5/6/100/15`, exit 26 (P3 ctors/this),
-obj4 `1/0/0/1`, `7/9/0`, exit 16 (P3 instanceof/cast); всеки — exit code + stdout чек).
+obj4 `1/0/0/1`, `7/9/0`, exit 16 (P3 instanceof/cast),
+obj5 `15/7/1/1/0/1/7/7/2/1/4/0`, exit 77 (P3 extends/super/subtype); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -177,6 +178,25 @@ join-ове изпълват **ptr phi**-та и **ptr константи** — 
 `adrp x9, 0` → gas internal error). Пример `examples/obj4.mj` (exact класове A/B с еднакви
 полета, `instanceof` в четирите посоки, успешен и неуспешен cast, cast-на-задача → null) →
 `1/0/0/1`, `7/9/0`, exit 16.
+
+### Обекти / класове (P3, наследяване `extends` + `super(...)`)
+
+`class B extends A` се строи с три pre-pass-а в frontend-а: `collectClass` (рекурсивно първо
+super-класът, cyclic guard; subclass layout **продължава от** super-а — офсетът започва от
+`classSizes[super]` и super-полетата се копират в map-а на същите офсети), `collectSigs` (метод
+DB за всички класове) и `emitMethods` (bodies). Инстанс-методи се наследяват през `lookupMethod`
+(ход по `classSuper` веригата); bare-name скан преферира super-веригата на текущия клас. Ctor-ите
+поддържат `this(...)` и `super(...)` (Janino `SuperConstructorInvocation`) — super-ctor се resolve-ва
+по `super::<init>` сигнатурите и се вика с `[this, args…]`; при липса на явно обръщане се инжектира
+имплицитен `super()` ако суперкласът има 0-арг ctor. `instanceof`/cast вече НЕ сравнява exact
+клас-индекс: `subtypeTest` проверява дали динамичният индекс е в рефлексивно-транзитивното
+затваряне на sub по super (едноблокова OR-верига от `cmpeq`); несъвместим cast връща null.
+Попътно: нови ALU rules `AND_i32`/`OR_i32` (arm `and`/`orr`, x86 movl/andl/orl) и fix в
+`Emitter.saveSpills` — 2-арг phi-move `MOV(val, phi)` с spill-нат phi записва стойността обратно
+в слота на phi-то (иначе join чете stale стойност). Диспечът остава **статичен** (без
+vtable/override засега). Пример `examples/obj5.mj` (A/B/C верига, `super(7)`/`super()`/`super(4)`,
+наследени полета и методи, subtype `instanceof`/cast, `(C) b` → null) →
+`15/7/1/1/0/1/7/7/2/1/4/0`, exit 77.
 
 ## Пътна карта
 

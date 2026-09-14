@@ -1,0 +1,42 @@
+class A {
+    int x;
+    A() { x = 1; }
+    A(int v) { x = v; }
+    int base() { return 3; }
+}
+class B extends A {
+    int y;
+    B() { super(7); y = 5; }
+    B(int w) { super(); y = w; }
+    int sum() { return x + y + base(); }
+    int ax() { return x; }
+}
+class C extends B {
+    int z;
+    C() { super(4); z = ax() + 1; }
+}
+class T {
+    static int main() {
+        B b = new B();
+        k_println_i32(b.sum());
+        k_println_i32(b.x);
+        A a = b;
+        k_println_i32(a instanceof A);
+        k_println_i32(b instanceof A);
+        k_println_i32(b instanceof C);
+        k_println_i32(a instanceof B);
+        B c1 = (B) a;
+        k_println_i32(c1.x);
+        A a2 = (A) b;
+        k_println_i32(a2.x);
+        C c = new C();
+        k_println_i32(c.z);
+        k_println_i32(c instanceof A);
+        B bad = (B) c;
+        k_println_i32(bad.y);
+        C nc = (C) b;
+        int ok = nc != null ? 1 : 0;
+        k_println_i32(ok);
+        return ok == 0 ? 77 : 0;
+    }
+}

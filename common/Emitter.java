@@ -212,6 +212,11 @@ public class Emitter {
 
     void saveSpills(Ir.Value v) {
         if (v.type != null && !v.type.equals("void") && spilled(v)) spillStore(v);
+        // Two-operand MOVs are synthetic phi-moves (PhiElim): the second
+        // argument doubles as the destination. If that phi value is spilled,
+        // the result computed by the rule must be written back to its slot.
+        if ((v.op.equals("MOV_i32") || v.op.equals("MOV_i64") || v.op.equals("MOV_f64"))
+                && v.args.size() >= 2 && spilled(v.args.get(1))) spillStore(v.args.get(1));
     }
 
     // ─── template interpreter ───────────────────────────────────────────────
