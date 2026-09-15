@@ -51,9 +51,9 @@ regression + docs + commit + push.
   `ed21fa3` P3 instanceof/cast exact-class (obj4) → `6f056f7` P3 extends/super/subtype (obj5) →
   **`580c5fd` P3 vtable dispatch + override (обj6; README/ROADMAP вкл в същия комит)**
   → **`5a17f16` P3 static полета (обj7)`.** → **P3 явен super.method/field (обj8, HEAD)**
-  → **P3 `Foo[]` масиви от обекти (обj9; 27/27)**
+  → **`1ac9d83` P3 `Foo[]` масиви от обекти (обj9; 27/27)**
 
-## Status (актуално към HEAD = NEW, регресия 27/27)
+## Status (актуално към HEAD = 1ac9d83, регресия 27/27)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
