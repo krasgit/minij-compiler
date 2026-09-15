@@ -717,6 +717,14 @@ public class AstLowerMain {
         String name = null;
         if (a.lhs instanceof Java.AmbiguousName an) name = an.identifiers[0];
         if (name == null) {
+            if (isSuperNode(a.lhs, "SuperclassFieldAccessExpression")) {
+                FieldAddr f = superFieldAddr(getStr(a.lhs, "fieldName"));
+                if (f != null) {
+                    Ir.Value v = conv(expr(a.rhs), f.ir);
+                    Ir.Value st = emit("st_" + f.ir, "void", f.addr, v); st.dbg = tag(a);
+                    return;
+                }
+            }
             if (a.lhs instanceof Java.FieldAccessExpression fe) {
                 String nm = getStr(fe, "fieldName");
                 Object lh = get(fe, "lhs");
@@ -801,6 +809,61 @@ public class AstLowerMain {
         Object[] f = classIndex.containsKey(an.identifiers[0]) ? staticField(an.identifiers[0], an.identifiers[1]) : null;
         if (f == null) { String cj = varJType.get(an.identifiers[0]); if (cj != null) f = staticField(cj, an.identifiers[1]); }
         return f;
+    }
+
+    /** Явен `super.m(args…)` в instance метод → ДИРЕКТЕН call на super-символа (без vtable:
+     *  super винаги обхожда статичния super-тип, дори ако потомък го override-ва). */
+    Ir.Value superCall(Object e, int dbg) {
+        String mn = getStr(e, "methodName");
+        Object[] aa = get(e, "arguments") instanceof Object[] a ? a : new Object[0];
+        Java.Rvalue[] args = new Java.Rvalue[aa.length];
+        for (int i = 0; i < aa.length; i++) if (aa[i] instanceof Java.Rvalue r) args[i] = r;
+        MethSig ms = null;
+        String c = curClass == null ? null : classSuper.get(curClass);
+        while (c != null && ms == null) {
+            List<MethSig> ls = classMethods.get(c + "::" + mn);
+            if (ls != null && !ls.isEmpty()) {
+                MethSig r = resolveSig(ls, args);
+                if (r != null && !r.isStatic) ms = r;
+            }
+            c = classSuper.get(c);
+        }
+        if (ms == null) throw new RuntimeException("super method not found: super." + mn);
+        Ir.Value al = allocaOf.get("this");
+        if (al == null) throw new RuntimeException("super." + mn + " outside instance method");
+        Ir.Value th = emit("load", al.type, al); th.dbg = -1;
+        List<Ir.Value> cargs = new ArrayList<>();
+        cargs.add(th);
+        for (int i = 0; i < args.length; i++)
+            if (args[i] != null)
+                cargs.add(conv(expr(args[i]), ms.pirs[i] == null ? "i32" : ms.pirs[i]));
+        String crt = ms.retIr == null ? "i32" : ms.retIr.equals("void") ? "i32" : ms.retIr;
+        Ir.Value call = emit("call", crt);
+        call.name = ms.symbol;
+        call.args.addAll(cargs);
+        call.dbg = dbg;
+        return call;
+    }
+
+    /** `super.<field>` read/write: същият layout като this (subclass наследява super-полетата),
+     *  плюс статичен fallback в super-веригата. */
+    FieldAddr superFieldAddr(String name) {
+        if (curClass == null) return null;
+        Ir.Value al = allocaOf.get("this");
+        if (al == null) return null;
+        Map<String, Object[]> fs = classFields.get(curClass);
+        Object[] f = fs == null ? null : fs.get(name);
+        if (f != null) {
+            Ir.Value v = emit("load", al.type, al); v.dbg = -1;
+            Ir.Value ad = emit("lea_field", "ptr", v, konst((Integer) f[1], "i64", -1)); ad.dbg = -1;
+            return new FieldAddr(ad, (String) f[0], (String) f[2]);
+        }
+        Object[] sf = staticField(classSuper.get(curClass), name);
+        if (sf != null) return staticAddrField(sf, -1);
+        return null;
+    }
+    static boolean isSuperNode(Object o, String simple) {
+        return o != null && o.getClass().getSimpleName().equals(simple);
     }
 
     static class MethSig {
@@ -1067,6 +1130,14 @@ if (e == null) return konst(0, "i32", -1);
             Ir.Value al = allocaOf.get("this");
             if (al == null) throw new RuntimeException("this used outside instance method");
             Ir.Value l = emit("load", al.type, al); l.dbg = tag(e);
+            return l;
+        }
+        if (isSuperNode(e, "SuperclassMethodInvocation")) return superCall(e, tag(e));
+        if (isSuperNode(e, "SuperclassFieldAccessExpression")) {
+            String fn = getStr(e, "fieldName");
+            FieldAddr f = superFieldAddr(fn);
+            if (f == null) throw new RuntimeException("super field access on non-field: " + fn);
+            Ir.Value l = emit("ld_" + f.ir, f.ir, f.addr); l.dbg = tag(e);
             return l;
         }
         if (e instanceof Java.IntegerLiteral lit) {

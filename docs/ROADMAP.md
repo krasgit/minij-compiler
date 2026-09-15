@@ -106,8 +106,8 @@
 > (`h.next.next.v` — 4 ids), после `ld_<ft>`/`st_<ft>`. Типове: `irType`/`javaTypeOf`/
 > `inferType`/`elemOf` разпознават клас-имена → `ptr`. Regalloc/Emitter непроменени освен
 > новите ops. Пример `examples/obj.mj`; регресия **19/19 (arm64)**; x86 textual emit OK.
-> Регресия сега: **25/25 (arm64)** — obj, obj2, obj3, obj4, obj5, obj6, obj7 добавени.
-> Остатък P3: `super.method()` явен dispatch, `Foo[]` насочване.
+> Регресия сега: **26/26 (arm64)** — obj, obj2, obj3, obj4, obj5, obj6, obj7, obj8 добавени.
+> Остатък P3: `Foo[]` насочване (тест с пример).
 >
 > **P3 конструктори + `this` chaining (DONE, пример `examples/obj3.mj`, регресия 21/21):**
 > `new Foo(args)` → alloc_obj+st_hdr + call `Foo_init[<_irparams>]` ([obj, args…], overload
@@ -159,6 +159,19 @@
 > `this.count`/`expr.count` (static fallback в `fieldAddrFrom`); наследяване през super-верига
 > (`staticField()` walk-ва `classSuper`). `inferType` за 2-ид AmbigName resolve-ва статик преди
 > generic `i32`. Попътно: **bare `this` като стойност** → `load allocaOf["this"]` (беше konst 0).
+>
+> **P3 явен `super.method()` + `super.field` (DONE, пример `examples/obj8.mj`, регресия 26/26):**
+> Janino пази `super.m()` в **отделен AST клас** `Java.SuperclassMethodInvocation` (`methodName` +
+> `arguments`, имплементира `Rvalue`) и `super.f` в `Java.SuperclassFieldAccessExpression`
+> (`fieldName`, `qualification=null`) — НЕ са `MethodInvocation`/`FieldAccessExpression`. Frontend:
+> `superCall()` walk-ва super-веригата от `classSuper[curClass]` нагоре, resolve-ва overload по
+> `classMethods["<super>::<name>"]` (non-static) и emit-ва **директен `call <sym>`** с `[this,
+> args…]` (без `icall`/vtable — това е смисълът на super). `superFieldAddr()` третира `super.f`
+> като `this.f` (наследените полета са на същите offsets в subclass layout-а) + static fallback в
+> super-веригата; read-ът e в `expr()`, write-ът в `handleAssign`. Проверка: `B_useSuper` →
+> `call A_g`, `C_twoLevel` → `call B_g` (директно), докато `a.f()/b.f()/c.f()` продължават да
+> диспечват виртуално по динамичния клас. Остатък P3: `Foo[]` масиви от обекти (по `elemOf`→ptr
+> трябва да работят; тест с пример).
 >
 > **P3 методи + overloads (DONE, пример `examples/obj2.mj`, регресия 20/20):** instance-методи
 > `obj.m(args)` + static `Cls.m(args)` диспеч без vtable. `cls()` гради `MethSig` DB в

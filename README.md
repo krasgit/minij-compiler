@@ -93,7 +93,7 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **25/25 теста на arm64**
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **26/26 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
@@ -104,7 +104,8 @@ obj3 `3/30/10/20`, `5/6/100/15`, exit 26 (P3 ctors/this),
 obj4 `1/0/0/1`, `7/9/0`, exit 16 (P3 instanceof/cast),
 obj5 `15/7/1/1/0/1/7/7/2/1/4/0`, exit 77 (P3 extends/super/subtype),
 obj6 `18/64/8/11/-1/64`, exit 34 (P3 vtable dispatch/override),
-obj7 `2/2/3/4/100/100/107/2/2`, exit 42 (P3 static полета); всеки — exit code + stdout чек).
+obj7 `2/2/3/4/100/100/107/2/2`, exit 42 (P3 static полета),
+obj8 `3/8/10/6/96/996/11/102/15/15`, exit 42 (P3 super.method/field); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -230,6 +231,19 @@ segfault-ва динамичния линкер (даде се с gdb bt в `lds
 (load от `allocaOf["this"]`), а не тихо дава 0. Пример `examples/obj7.mj` (споделен
 `static int counter`/`long total`/`T last` между инстанции + `T.counter`, `b.counter`, bare `counter`
 в static `next()`, `(int) (T.total / 20000000000L)`) → `2/2/3/4/100/100/107/2/2`, exit 42.
+
+### Обекти / класове (P3, явен `super.method()` + `super.field`)
+
+`super.m(args…)` се пази в отделни Janino AST възли — `Java.SuperclassMethodInvocation`
+(`methodName` + `arguments`) и `Java.SuperclassFieldAccessExpression` (`fieldName`) — и фронтендът
+ги снижава директно (без vtable): `superCall()` resolve-ва метода по super-веригата на `curClass`
+(клас-символ на най-близкия супер, който го дефинира, non-static) и прави обикновен `call <sym>`
+с `[this, args…]`. `super.<field>` и в двете посоки (`expr()` read, `handleAssign` write) минава
+през `superFieldAddr()` — същият layout като `this` (наследените полета са на същите offsets) +
+static fallback в super-веригата. Това позволява override-ващ метод да достъпи базовия:
+`return super.g() + 1` във `B.g()` вика `A_g`, докато `a.f()`/`b.f()`/`c.f()` диспечват виртуално
+по динамичния клас. Пример `examples/obj8.mj` (A/B/C йерархия с override на `g`, `super.g()` на
+1 и 2 нива, `super.v = super.v + 5` write+read) → `3/8/10/6/96/996/11/102/15/15`, exit 42.
 
 ## Пътна карта
 

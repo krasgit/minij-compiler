@@ -1,0 +1,38 @@
+class A {
+    int v;
+    A(int n) { v = n; }
+    int g() { return 10; }
+    int f() { return g() - 4; }
+}
+
+class B extends A {
+    int g() { return 100; }
+    int useSuper() { return super.g() + 1; }
+    B(int n) { super(n * 2); }
+}
+
+class C extends B {
+    int g() { return 1000; }
+    int twoLevel() { return super.g() + 2; }
+    int superField() { super.v = super.v + 5; return super.v; }
+    C(int n) { super(n); }
+}
+
+class T {
+    static int main() {
+        A a = new A(3);
+        B b = new B(4);
+        C c = new C(5);
+        k_println_i32(a.v);
+        k_println_i32(b.v);
+        k_println_i32(c.v);
+        k_println_i32(a.f());
+        k_println_i32(b.f());
+        k_println_i32(c.f());
+        k_println_i32(b.useSuper());
+        k_println_i32(c.twoLevel());
+        k_println_i32(c.superField());
+        k_println_i32(c.v);
+        return 42;
+    }
+}
