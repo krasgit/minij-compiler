@@ -49,9 +49,10 @@ regression + docs + commit + push.
   `8f11393` P3 methods + overloads → `16b46dc` docs →
   `27d0ac9` P3 конструктори + `this` chaining → `e31e319` docs →
   `ed21fa3` P3 instanceof/cast exact-class (obj4) → `6f056f7` P3 extends/super/subtype (obj5) →
-  **`580c5fd` P3 vtable dispatch + override (обj6; README/ROADMAP вкл в същия комит).**
+  **`580c5fd` P3 vtable dispatch + override (обj6; README/ROADMAP вкл в същия комит)**
+  → **`5a17f16` P3 static полета (обj7)`.**
 
-## Status (актуално към HEAD = 580c5fd)
+## Status (актуално към HEAD = 5a17f16)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
@@ -60,9 +61,10 @@ regression + docs + commit + push.
   **P3 конструктори с аргументи + `this` chaining (21/21 — obj3.mj)**;
   **P3 instanceof/cast exact-class (22/22 — obj4.mj)**;
   **P3 наследяване `extends` + `super(...)` + subtype instanceof/cast (23/23 — obj5.mj)**;
-  **P3 vtable dispatch + override (24/24 — obj6.mj)**.
-- ACTIVE: P3 в ход — vtable-ът е готов; следва **static полета** (виж NEXT MOVE).
-- Regression: **24/24 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+  **P3 vtable dispatch + override (24/24 — obj6.mj)**;
+  **P3 static полета (25/25 — obj7.mj)**.
+- ACTIVE: P3 в ход — static полета готови; следва **явен `super.method()` dispatch** (виж NEXT MOVE).
+- Regression: **25/25 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
   str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
   **obj** (`5/7/6/12`, `1/2/3/1`, exit 2),
@@ -70,16 +72,19 @@ regression + docs + commit + push.
   **obj3** (`3/30/10/20`, `5/6/100/15`, exit 26),
   **obj4** (`1/0/0/1`, `7/9/0`, exit 16),
   **obj5** (`15/7/1/1/0/1/7/7/2/1/4/0`, exit 77),
-  **obj6** (`18/64/8/11/-1/64`, exit 34).
+  **obj6** (`18/64/8/11/-1/64`, exit 34),
+  **obj7** (`2/2/3/4/100/100/107/2/2`, exit 42).
 
 ## NEXT MOVE (при "continue")
 
-P3 vtable dispatch е **завършен** → следващите P3 под-милстони, по реда:
-1. **Static полета** — `static int ctr`, `Foo.count` read/write (layout извън обектите, `.data`).
-2. Явен `super.method()` диспеч; `Foo[]` насочване (вече сигурно работи по `elemOf`→ptr).
+P3 static полета е **завършен** → следващите P3 под-милстони, по реда:
+1. **Явен `super.method()` диспеч** — `Java.FieldAccessExpression` с lhs=`SuperReference` (или
+   AmbigName [`super`, `m`]) → директно call на super-символа (не virtual). Първо probe:
+   shapes за `super.area()` / `super.mark()` в Box.
+2. `Foo[]` насочване (вече сигурно работи по `elemOf`→ptr; тест с пример).
 
 Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `run_tests.sh`
-(24/24→N/N) → README/ROADMAP/CONTEXT → комит+push.
+(25/25→N/N) → README/ROADMAP/CONTEXT → комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
 
@@ -156,7 +161,22 @@ P3 vtable dispatch е **завършен** → следващите P3 под-м
   **ВАЖНО: vtables трябва да са в `.data`, не `.rodata`** — vtables array и slot-ове са `.quad
   <символ>` → R_AARCH64_RELATIVE при load в PIE; ldso пише в тях, а .rodata е RO → segfault
   (gdb bt: `ldso/dynlink.c do_relocs`).
-  **Не се реализиран vtable/override dispatch** — статичен dispatch до момента (P3 vtable е next).
+- **P3 static полета (obj7, проверено)**: `Foo.count`/`f.count` (read И assign) = **2-ид
+  `AmbiguousName`**; `this.count = v` → `Assignment(lhs=FieldAccessExpression(lhs=ThisReference))`;
+  bare `count` = `AmbiguousName` с 1 id. `FieldDeclarationOrInitializer` членовете се проверяват с
+  `mb instanceof Java.FieldDeclaration fd && fd.isStatic()`; init-ите се отхвърлят (грешка).
+  data symbols: `<ClassName>_<name>`; `.bss` storage (`.globl` + `.zero 4/8`), нов `.statics` IR
+  блок `symbol : size` (Writer/Reader `readStatics`). Нов op `lea_static` (0-арг, името се носи
+  като call-ите: Writer-ът го пише в call-branch-а с `:type()`, Reader `lea_static`→call-branch-а;
+  arm64 `adrp x9,sym`/`add $dst,x9,:lo12:sym`, x86 `leaq sym(%rip),$dst`). Пътища: `ambigStatic`
+  в `fieldAddr` (2-ид AmbigName: `classIndex.containsKey(ids[0])` клас-квалифициран, иначе
+  `varJType` реceiver-а), static fallback в `fieldThis` (bare) и `fieldAddrFrom` (this/expr);
+  `staticField(cls,name)` walk-ва `classSuper` → наследени static-и. `inferType` resolve-ва stats-а
+  преди generic `i32` (иначе `Foo.bigDouble` като arg ще иде в `k_println_i32`). **`curClass` се
+  сенася дори за static методи** (line 444: `sig.cn`), затова bare static достъп работи и в static
+  методи (fieldThis `allocaOf["this"]==null` → instance lookup пада → static fallback).
+  **ВАЖНО: bare `this` като стойност** (`last = this`) — преди падаше тихо до konst 0; сега:
+  `expr(ThisReference)` → `load allocaOf["this"]` (throw извън instance метод).
 - **Emitter spill bugfix (с този комит, ВАЖНО)**: `saveSpills` записваше обратно само РЕЗУЛТАТА на
   инструкцията. Phi-move-ите от PhiElim са 2-арг `MOV_<s>(val, phiDst)` — dst (phi) стои в `args[1]`.
   Ако phi-то е spill-нато, стойността оставаше в скретч-temp и се губи при jump-а (join-блокчето чете
@@ -249,10 +269,10 @@ P3 vtable dispatch е **завършен** → следващите P3 под-м
 
 ## Testing
 
-- `cd /tmp/opencode && bash run_tests.sh` → build + 24 теста; текущ резултат **24/24**.
+- `cd /tmp/opencode && bash run_tests.sh` → build + 25 теста; текущ резултат **25/25**.
   (Може да отнеме >2 мин — таймаут-ът на bash tool трябва да е ~400s.)
 - Тест функции: `run name src exitcode`, `run_out name src exitcode $'expected\nout\n'`;
-  добавяне на нов пример = `run_out obj6 "$DIR/examples/obj6.mj" 34 $'18\n64\n8\n11\n-1\n64\n'`
+  добавяне на нов пример = `run_out obj7 "$DIR/examples/obj7.mj" 42 $'2\n2\n3\n4\n100\n100\n107\n2\n2\n'`
   + обновяват се броя и README/ROADMAP/CONTEXT.
 - Примерни файлове за multi-D: `examples/md.mj`. OOB multi-D (m7/m8 .mj в /tmp/opencode) → exit 134.
 - Отделни минимални програми за бисouter (m1..m8.mj) стоят в /tmp/opencode; не се комитват.
@@ -268,25 +288,31 @@ P3 vtable dispatch е **завършен** → следващите P3 под-м
   dispatch, resolveSig overloads, bare-name scan, javaTypeOf class-method resolution;
   ctors: cd.constructors (ConstructorDeclarator), ctorSym `Foo_init*`, this(...)-chaining via
   constructorInvocation, NewClassInstance ctor call, void-return без args;
-  vtable: sigKey/classSlots/buildVtables/vtableSymbol/virtualCall (icall) + bare-this virtual**).
+  vtable: sigKey/classSlots/buildVtables/vtableSymbol/virtualCall (icall) + bare-this virtual;
+  statics: staticFields (FieldDeclaration.isStatic, init→error), staticField/staticAddr/
+  staticAddrField/ambigStatic, static fallbacks в fieldAddr/fieldAddrFrom/fieldThis, expr(ThisReference)**).
 - `common/Emitter.java` — spill support (spillTemp/spillBytes/stemp/slotMem/spillLoad/spillStore/
   prepareSpills/saveSpills/maxSpillBytes), x86 ptr→movq, template interpreter + Ctx,
-  **`${cargs}` loop-list (base=1), vtables в `.data` (R_AARCH64_RELATIVE → не .rodata)**.
+  **`${cargs}` loop-list (base=1), vtables в `.data` (R_AARCH64_RELATIVE → не .rodata),
+  statics в `.bss` (p2align 3 + .globl + .zero)**.
 - `common/Regalloc.java` — linear scan + preassign, loop/phi/void liveness, "stack -N" locs.
 - `common/Ir.java` — Writer/Reader; **void `return` остава гол**; **`.vtables` блок (VTable →
-  label+syms, readVtables)**.
+  label+syms, readVtables)**; **`.statics` блок (Static → symbol+size, readStatics)**;
+  **`lea_static` се пише/чете като call (name:type)**.
 - `common/RuleParser.java` — rule v2 parser (Rules.width/isFpType); **`args...` патерн (име+any)**.
 - `rules/arm.rule`, `rules/x86.rule` — include `alloc_i32/i64/f64/ptr`/`alloc_obj`, `st_hdr`, `len`,
   `chk`, `lea_i32/i64/f64/ptr`/`lea_field`, `ld_i32/i64/f64/ptr`, `st_i32/i64/f64/ptr`,
   CONST/MOV/ADD/…, **`return` (void)**, **`vt_ref`/`ICALL_i32/i64/f64` (`${cargs}`)**,
-  prologue/epilogue.
+  **`lea_static` (${name}: adrp/add :lo12 / leaq sym(%rip))**, prologue/epilogue.
 - `runtime/runtime.c`, `runtime/crt0.S` — k_* helpers (`k_print/k_println`, `k_print_i32/
   k_println_i32`, `k_newline`, **`k_string_equals`/`k_string_concat`**), mm_alloc, syscalls.
 - `examples/*.mj` — hello, gcd, fib, forloop, dowhile, ternary, switch, print, dbl, lng, mix,
-  arrays, oob, str, str2, md, str3, obj, obj2, **obj3**, **obj4**, **obj5**, **obj6**, native.
-- `/tmp/opencode/run_tests.sh` — regression harness (24 теста; беше оправен след corrupt edit:
+  arrays, oob, str, str2, md, str3, obj, obj2, **obj3**, **obj4**, **obj5**, **obj6**,
+  **obj7**, native.
+- `/tmp/opencode/run_tests.sh` — regression harness (25 теста; беше оправен след corrupt edit:
   `run_out` без `}`/без `got=$?`, орязани expected-out за dbl/arrays/md).
-- `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD/SE/**OProbe**/OProbe2/OProbe3) — Janino AST probes, преизползваеми.
+- `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD/SE/**OProbe**/OProbe2/OProbe3/**StProbe**/
+  StProbe2/StProbe3/StProbe4) — Janino AST probes, преизползваеми.
 - `README.md`, `docs/ROADMAP.md`, `docs/ir-format.md`, `docs/rule-format.md`, `docs/corelib.md`.
 
 ## При съмнение
