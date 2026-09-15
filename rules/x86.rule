@@ -316,6 +316,7 @@ emit RETURN_i32(v) {
     jmp ${exit}
 }
 emit return() {
+    movl $0, %eax
     jmp ${exit}
 }
 emit RETURN_i64(v) {

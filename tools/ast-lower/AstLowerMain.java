@@ -95,6 +95,7 @@ public class AstLowerMain {
             case "double": return "f64";
             case "float": return "f64";   // P1: преобладаване на float → double (запазва динамиката, документирано)
             case "String": return "ptr";  // P2: lean String = char[]
+            case "void": return "void";   // P3: void-методи (пуста retType → Reader оставя return гол)
             default: return "i32";
         }
     }

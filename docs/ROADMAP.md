@@ -106,8 +106,18 @@
 > (`h.next.next.v` — 4 ids), после `ld_<ft>`/`st_<ft>`. Типове: `irType`/`javaTypeOf`/
 > `inferType`/`elemOf` разпознават клас-имена → `ptr`. Regalloc/Emitter непроменени освен
 > новите ops. Пример `examples/obj.mj`; регресия **19/19 (arm64)**; x86 textual emit OK.
-> Регресия сега: **27/27 (arm64)** — obj, obj2, obj3, obj4, obj5, obj6, obj7, obj8, obj9 добавени.
-> Остатък P3: `static void` main без `return` (или следващ P4/P3.5 решение).
+> Регресия сега: **28/28 (arm64)** — obj, obj2, obj3, obj4, obj5, obj6, obj7, obj8, obj9, obj10 добавени.
+>
+> **P3 `void` методи + `static void main` (DONE, пример `examples/obj10.mj`, регресия 28/28):**
+> `mapType("void")` вече връща `"void"` (преди падаше до fallback `"i32"`). Промяната оправя
+> пълен клас бъгове: void метод се сигнираше `-> i32` (buildSig), но `return;` (без стойност) все
+> пак се емитираше гол → Reader-ът (ир. `retType.equals("void")`) четеше `RETURN_i32` с 0 аргументи
+> → "no rule matches op 'RETURN_i32' with 0 args" в Emitter. Сега `retIr="void"`, `f.retType="void"`,
+> голият `return` се носи чисто (Writer/Reader/SsaLower вече пазят гол `return` за void-функции).
+> Call-site-овете (static/virtual `vt_ref`+`icall`) вече падаха на `crt="i32"` за void — без промени.
+> `static void main()` + екзит статус: `crt0.S` прави `bl main; mov x8,#93; svc #0` → exit взема x0,
+> затова arm64 `return()` rule-ът (и x86 за parity, `movl $0,%eax`) слага x0=0 при void return.
+> Тук всички instance/static void методи, изрични `return;`, инт-методи и `static void main`.
 >
 > **P3 конструктори + `this` chaining (DONE, пример `examples/obj3.mj`, регресия 21/21):**
 > `new Foo(args)` → alloc_obj+st_hdr + call `Foo_init[<_irparams>]` ([obj, args…], overload

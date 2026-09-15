@@ -1,0 +1,27 @@
+class Counter {
+    int n;
+    int bump() { n = n + 1; return n; }
+    void reset() { n = 0; }
+    void add1() { n = n + 1; return; }
+}
+
+class T {
+    static int doubleIt(int x) { return x * 2; }
+    static void printAll() {
+        k_println_i32(1);
+        k_println_i32(2);
+        return;
+    }
+    static void main() {
+        Counter c = new Counter();
+        k_println_i32(c.bump());
+        k_println_i32(c.bump());
+        c.reset();
+        c.add1();
+        c.add1();
+        k_println_i32(c.bump());
+        printAll();
+        k_println_i32(doubleIt(21));
+        return;
+    }
+}

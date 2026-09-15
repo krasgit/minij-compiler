@@ -51,9 +51,10 @@ regression + docs + commit + push.
   `ed21fa3` P3 instanceof/cast exact-class (obj4) → `6f056f7` P3 extends/super/subtype (obj5) →
   **`580c5fd` P3 vtable dispatch + override (обj6; README/ROADMAP вкл в същия комит)**
   → **`5a17f16` P3 static полета (обj7)`.** → **P3 явен super.method/field (обj8, HEAD)**
-  → **`1ac9d83` P3 `Foo[]` масиви от обекти (обj9; 27/27)**
+  → **`1ac9d83` P3 `Foo[]` масиви от обекти (обj9; 27/27)** → **`<HEAD>` P3 `void` методи +
+  `static void main` (обj10; 28/28)**
 
-## Status (актуално към HEAD = 1ac9d83, регресия 27/27)
+## Status (актуално към HEAD = <HEAD>, регресия 28/28)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
@@ -65,10 +66,12 @@ regression + docs + commit + push.
   **P3 vtable dispatch + override (24/24 — obj6.mj)**;
   **P3 static полета (25/25 — obj7.mj)**;
   **P3 явен `super.method()`/`super.field` (26/26 — obj8.mj)**;
-  **P3 масиви от обекти `Foo[]` (27/27 — obj9.mj, без frontend промени — vtable+fields
-  от obj6-obj8 покриват всичко; проверки с ObjArrProbe2)**.
-- ACTIVE: P3 обекти e **завършен** — остава `static void` за main (виж NEXT MOVE).
-- Regression: **27/27 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+  **P3 `Foo[]` масиви от обекти (27/27 — obj9.mj, без frontend промени — vtable+fields
+  от obj6-obj8 покриват всичко; проверки с ObjArrProbe2)**;
+  **P3 `void` методи + `static void main` (28/28 — obj10.mj, `mapType("void")→"void"`,
+  arm rule `return()` с `mov x0,#0`)**.
+- ACTIVE: P3 обекти e **завършен** (вкл. void). Следва P4-Control или P3.5 GC (виж NEXT MOVE).
+- Regression: **28/28 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
   str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
   **obj** (`5/7/6/12`, `1/2/3/1`, exit 2),
@@ -79,21 +82,21 @@ regression + docs + commit + push.
   **obj6** (`18/64/8/11/-1/64`, exit 34),
   **obj7** (`2/2/3/4/100/100/107/2/2`, exit 42),
   **obj8** (`3/8/10/6/96/996/11/102/15/15`, exit 42),
-  **obj9** (`28/11/1/15/25/5/5/4`, exit 42).
+  **obj9** (`28/11/1/15/25/5/5/4`, exit 42),
+  **obj10** (`1/2/3/1/2/42`, exit 0).
 
 ## NEXT MOVE (при "continue")
 
-P3 `Foo[]` масиви са **завършени** (obj9, 27/27, нулеви frontend промени) → следва:
-1. **`static void` за main без return** (или всяка void функция): `void f() {...}` без return
-   трябва да понесе void-return (поддръжката на `return;` в void вече се прави). TODO:
-   - `static void main()` — `main` в crt0/runtime чака `int` в x0? провери `runtime/crt0.S`
-     (обвивката чете `$?` от main-а) — може нужен конвенция "main връща 0".
-   - Frontend: метод с `retJt=="void"` вече има void-return правила (Reader/SsaLower), но
-     `static int main()` е твърдо закотвен в подсистемите — потърси `main` специал-касе-а.
-2. След това: P4-Control / P3.5 GC решение (слота е в docs/ROADMAP.md).
+P3 e **завършен** (вкл. `void` методи + `static void main`, obj10, 28/28) → следва:
+1. **P4-Control** (слота е в docs/ROADMAP.md) — контроля flow: `for`/`while`/`do-while`/`break`/
+   `continue`/`switch`/`?:` са support-нати поне частично от P0-P2, но P4 ги довършва като
+   полноценен милстон (документиране, edge-cases, `&&`/`||` short-circuit, `?:` assignable).
+   ИЛИ
+2. **P3.5 GC решение** — досега паметта е arena/без free-ване; GC (mark-sweep по vtables земя)
+   е големият риск за P4+. Препоръчвам да се вземе решение с потребителя преди P4.
 
 Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `run_tests.sh`
-(27/27→N/N) → README/ROADMAP/CONTEXT → комит+push.
+(28/28→N/N) → README/ROADMAP/CONTEXT → комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
 
@@ -137,9 +140,20 @@ P3 `Foo[]` масиви са **завършени** (obj9, 27/27, нулеви f
   **фантомен null arg** (Reader/Writer асign-ваше му id → `mov x0, w9`, operand mismatch). Сега:
   (1) frontend `return void` ЕМИТИРА без args; (2) `Ir.Reader` оставя `return` **гол**
   (`"return"`, без suffix) за функции с `retType==void` (иначе `RETURN_i32` с 0 args → "no rule
-  matches"); (3) SsaLower guard същия: void → стар `"return"`; (4) **нови rule-и
-  `emit return()`** в arm.rule (`b ${exit}`) и x86.rule (`jmp ${exit}`).
+  matches"); (3) SsaLower guard същия: void → стар `"return"`; (4) **rule-и `emit return()`
+  в arm.rule (`b ${exit}`) и x86.rule (`jmp ${exit}`)**.
   Мантика: `Reader` double-suffixing-а `return` при всеки re-read беше скрит източник на бъгове.
+- **P3 `void` методи + `static void main` (obj10, проверено)**: `mapType("void")` сега връща
+  **`"void"`** (преди падаше до fallback `"i32"`). Симптомът: void метод се сигнираше `-> i32`
+  (buildSig/retIr от mapType), но `return;` емитираше гол `return` → Reader-ът (sp. `retType.equals
+  ("void")`) го правеше `RETURN_i32` с 0 args → `no rule matches op 'RETURN_i32' with 0 args`.
+  С fix-а: `retIr="void"`, `f.retType="void"`, гол `return` минава чисто до `return()` rule-а.
+  Call-site-овете (static 841/virtual `vt_ref`+`icall` 992, 1399, bare-name 1461) вече падаха на
+  `crt="i32"` за void — без промени. `static void main()` + exit: `crt0.S` = `bl main; mov x8,#93;
+  svc #0` → exit взима x0 → arm64 `return()` rule-а върна и добавя `mov x0, #0` (x86 parity: `movl
+  $0, %eax` пред `jmp ${exit}`; x86 es локально не-тестляем — aarch64-only binutils). Пример
+  `examples/obj10.mj` (instance `reset()/add1()` + static `printAll()` + изрични `return;` +
+  инт-методи + `static void main`) → `1/2/3/1/2/42`, exit 0.
 - **П3 наследяване `extends` + `super(...)` (obj5, проверено)**: `NamedClassDeclaration.extendedType`
   е `Java.ReferenceType` c `identifiers=[Име]` (или null). Frontend dържи `classSuper (cls→super)` и
   `allDecls (cls→decl)`; Main прави 3 pre-pass-a: `collectClass` (рекурсия в super-а ПЪРВО, цикличен
@@ -299,10 +313,10 @@ P3 `Foo[]` масиви са **завършени** (obj9, 27/27, нулеви f
 
 ## Testing
 
-- `cd /tmp/opencode && bash run_tests.sh` → build + 27 теста; текущ резултат **27/27**.
+- `cd /tmp/opencode && bash run_tests.sh` → build + 28 теста; текущ резултат **28/28**.
   (Може да отнеме >2 мин — таймаут-ът на bash tool трябва да е ~400s.)
 - Тест функции: `run name src exitcode`, `run_out name src exitcode $'expected\nout\n'`;
-  добавяне на нов пример = `run_out obj9 "$DIR/examples/obj9.mj" 42 $'28\n11\n1\n15\n25\n5\n5\n4\n'`
+  добавяне на нов пример = `run_out obj10 "$DIR/examples/obj10.mj" 0 $'1\n2\n3\n1\n2\n42\n'`
   + обновяват се броя и README/ROADMAP/CONTEXT.
 - Примерни файлове за multi-D: `examples/md.mj`. OOB multi-D (m7/m8 .mj в /tmp/opencode) → exit 134.
 - Отделни минимални програми за бисouter (m1..m8.mj) стоят в /tmp/opencode; не се комитват.
@@ -324,7 +338,8 @@ P3 `Foo[]` масиви са **завършени** (obj9, 27/27, нулеви f
   super: superCall (SuperclassMethodInvocation, direct call по super-верига + resolveSig),
   superFieldAddr (SuperclassFieldAccessExpression read+write), isSuperNode**;
   **Foo[]: без промени — elemOf `classIndex` branch + FieldAccessExpression/classSigs с
-  ArrayAccessExpression база (обj9, проверено с ObjArrProbe2)**).
+  ArrayAccessExpression база (обj9, проверено с ObjArrProbe2)**;
+  **void: mapType("void")→"void" (обj10)**).
 - `common/Emitter.java` — spill support (spillTemp/spillBytes/stemp/slotMem/spillLoad/spillStore/
   prepareSpills/saveSpills/maxSpillBytes), x86 ptr→movq, template interpreter + Ctx,
   **`${cargs}` loop-list (base=1), vtables в `.data` (R_AARCH64_RELATIVE → не .rodata),
@@ -336,14 +351,15 @@ P3 `Foo[]` масиви са **завършени** (obj9, 27/27, нулеви f
 - `common/RuleParser.java` — rule v2 parser (Rules.width/isFpType); **`args...` патерн (име+any)**.
 - `rules/arm.rule`, `rules/x86.rule` — include `alloc_i32/i64/f64/ptr`/`alloc_obj`, `st_hdr`, `len`,
   `chk`, `lea_i32/i64/f64/ptr`/`lea_field`, `ld_i32/i64/f64/ptr`, `st_i32/i64/f64/ptr`,
-  CONST/MOV/ADD/…, **`return` (void)**, **`vt_ref`/`ICALL_i32/i64/f64` (`${cargs}`)**,
+  CONST/MOV/ADD/…, **`return` (void: arm `mov x0, #0; b exit` / x86 `movl $0, %eax; jmp exit`)**
+  , **`vt_ref`/`ICALL_i32/i64/f64` (`${cargs}`)**,
   **`lea_static` (${name}: adrp/add :lo12 / leaq sym(%rip))**, prologue/epilogue.
 - `runtime/runtime.c`, `runtime/crt0.S` — k_* helpers (`k_print/k_println`, `k_print_i32/
   k_println_i32`, `k_newline`, **`k_string_equals`/`k_string_concat`**), mm_alloc, syscalls.
 - `examples/*.mj` — hello, gcd, fib, forloop, dowhile, ternary, switch, print, dbl, lng, mix,
   arrays, oob, str, str2, md, str3, obj, obj2, **obj3**, **obj4**, **obj5**, **obj6**,
-  **obj7**, **obj8**, **obj9**, native.
-- `/tmp/opencode/run_tests.sh` — regression harness (26 теста; беше оправен след corrupt edit:
+  **obj7**, **obj8**, **obj9**, **obj10**, native.
+- `/tmp/opencode/run_tests.sh` — regression harness (28 теста; беше оправен след corrupt edit:
   `run_out` без `}`/без `got=$?`, орязани expected-out за dbl/arrays/md).
 - `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD/SE/**OProbe**/OProbe2/OProbe3/**StProbe**/
   StProbe2/StProbe3/StProbe4/**SupProbe**/SupProbe2/SupProbe3/SupProbe4) — Janino AST probes,

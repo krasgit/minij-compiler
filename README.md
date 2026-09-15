@@ -93,7 +93,7 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **27/27 теста на arm64**
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **28/28 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
@@ -105,8 +105,9 @@ obj4 `1/0/0/1`, `7/9/0`, exit 16 (P3 instanceof/cast),
 obj5 `15/7/1/1/0/1/7/7/2/1/4/0`, exit 77 (P3 extends/super/subtype),
 obj6 `18/64/8/11/-1/64`, exit 34 (P3 vtable dispatch/override),
 obj7 `2/2/3/4/100/100/107/2/2`, exit 42 (P3 static полета),
-obj8 `3/8/10/6/96/996/11/102/15/15`, exit 42 (P3 super.method/field);
-obj9 `28/11/1/15/25/5/5/4`, exit 42 (P3 масив от обекти); всеки — exit code + stdout чек).
+obj8 `3/8/10/6/96/996/11/102/15/15`, exit 42 (P3 super.method/field),
+obj9 `28/11/1/15/25/5/5/4`, exit 42 (P3 масив от обекти),
+obj10 `1/2/3/1/2/42`, exit 0 (P3 void методи + `static void main`); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -262,6 +263,19 @@ ArrayAccessExpression`** — `javaTypeOf(ArrayAccessExpression)` връща ел
 Пример `examples/obj9.mj` (масив `Shape[]`, `arr[2] = new Box(5)` — последващите
 `arr[2].legend()`/`.area()`/`.mark()` диспечват в Box) →
 `28/11/1/15/25/5/5/4`, exit 42.
+
+### Обекти / класове (P3, `void` методи + `static void main`)
+
+`void` методи работят с пусто завръщане. Преди това `mapType("void")` падаше до `"i32"` в
+fallback-а и методът се сигнираше `-> i32`, но `return;` (без стойност) все пак се емитираше гол —
+Reader-ът (ир. `retType.equals("void")`) го четеше като `RETURN_i32` с 0 аргументи → грешка. Сега
+`mapType` връща `"void"`, `buildSig` дава `retIr="void"`, `f.retType="void"` и голият `return` минава
+чисто до пада в края (Reader/SsaLower-ът запазват голия `return` за void-функции). Call-site-овете
+(static/virtual/`vt_ref`+`icall`) вече падаха на `crt="i32"` за void. `static void main()` изисква
+и екзит-статус: `crt0` пуска `bl main` и `svc #93` (exit) с x0, затова arm64 `return()` rule-а
+(и x86-версията за parity) върна води до `mov x0, #0`. Пример `examples/obj10.mj`
+(инстантни `void reset()/add1()`, статичен `void printAll()`, изрични `return;`, инт-методи наред,
+`static void main`) → `1/2/3/1/2/42`, exit 0.
 
 ## Пътна карта
 
