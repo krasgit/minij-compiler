@@ -329,21 +329,21 @@ emit RETURN_f64(v) {
 
 emit CALL_i32(...) {
     for each ${args} i {
-        ${ws}[i] ${argregs}[i], ${args}[i]
+        ${ws}[i] ${args}[i], ${argregs}[i]
     }
     callq ${name}
     movl ${ret}, $dst
 }
 emit CALL_i64(...) {
     for each ${args} i {
-        ${ws}[i] ${argregs}[i], ${args}[i]
+        ${ws}[i] ${args}[i], ${argregs}[i]
     }
     callq ${name}
     movq ${ret}, $dst
 }
 emit CALL_f64(...) {
     for each ${args} i {
-        ${ws}[i] ${argregs}[i], ${args}[i]
+        ${ws}[i] ${args}[i], ${argregs}[i]
     }
     callq ${name}
     movsd ${ret}, $dst

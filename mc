@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$DIR/bin:$PATH"
@@ -59,8 +59,13 @@ else
     CC="${CC:-gcc}"
 fi
 "$CC" -fno-stack-protector -ffreestanding -O2 -c "$DIR/runtime/runtime.c" -o "$BASE.runtime.o"
-"$CC" -c "$DIR/runtime/crt0.S" -o "$BASE.crt0.o" 2>/dev/null \
-    || as "$DIR/runtime/crt0.S" -o "$BASE.crt0.o"
+if [ "$TARGET" = "arm64" ]; then
+    CRT0="$DIR/runtime/crt0.S"
+else
+    CRT0="$DIR/runtime/crt0-x64.S"
+fi
+"$CC" -c "$CRT0" -o "$BASE.crt0.o" 2>/dev/null \
+    || as "$CRT0" -o "$BASE.crt0.o"
 "$CC" -nostartfiles "$BASE.o" "$BASE.crt0.o" "$BASE.runtime.o" -lc -o "$OUT"
 
 if [ "$KEEP" = "0" ]; then

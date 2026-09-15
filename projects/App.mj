@@ -1,0 +1,18 @@
+class App {
+    /* MiniJ → x86-64 & arm64 native (P0+). Изпълнява се като mvn проект;
+     * резултатът е exit code на процеса. */
+    static int add(int a, int b) { return a + b; }
+    static int main() {
+    System.out.println("hello");
+
+     int sum = 0;
+          for (int i = 1; i <= 10; i = i + 1) {
+              sum = sum + i;
+              System.out.print("hello1 ");
+              System.out.println(sum);
+          }
+
+
+        return add(4, 3);           /* hello=47 → тук 7 */
+    }
+}

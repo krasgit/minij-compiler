@@ -3,3 +3,5 @@ lib/*.jar
 t_*
 *.o
 *.class
+/gcd.alloc.mir
+/-.alloc.mir

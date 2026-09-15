@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 set -e
 
 echo "═══ MiniJ Compiler Setup ═══"
@@ -1569,7 +1569,7 @@ EOF
 # ═══════════════════════════════════════════════════════════════════
 echo "→ build.sh"
 cat > build.sh <<'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 set -e
 cd "$(dirname "$0")"
 rm -rf out && mkdir -p out
@@ -1600,7 +1600,7 @@ for tool in janino-parse ast-lower ssa-build ssa-opt ssa-lower regalloc phi-elim
         emit-arm)     CLASS="EmitArmMain" ;;
     esac
     cat > "bin/$tool" <<EOF
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 DIR="\$(cd "\$(dirname "\$0")/.." && pwd)"
 CP="\$DIR/out:\$DIR/lib/janino.jar:\$DIR/lib/commons-compiler.jar"
 exec java -cp "\$CP" $CLASS "\$@"
@@ -1613,7 +1613,7 @@ done
 # ═══════════════════════════════════════════════════════════════════
 echo "→ mc"
 cat > mc <<'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$DIR/bin:$PATH"
@@ -1680,7 +1680,7 @@ chmod +x mc
 # ═══════════════════════════════════════════════════════════════════
 echo "→ test.sh"
 cat > test.sh <<'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 set -e
 cd "$(dirname "$0")"
 ./build.sh
