@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>bg.minij</groupId>
+  <artifactId>minij-app</artifactId>
+  <version>1.0</version>
+  <packaging>pom</packaging>
+
+  <name>MiniJ App (Maven build)</name>
+  <description>
+    Компилира projects/App.mj през локалния компилатор (../build.sh → ../mc)
+    до нативен arm64 бинарен, изпълнява го с qemu-aarch64 и проверява exit кода.
+    Програмата не ползва Java за компилацията си — само тулчейна от repo-то
+    (bin/* java mains + rules + runtime) + cross GCC + qemu-user.
+  </description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- exit кода, който App.mj трябва да върне (тук add(4,3)=7) -->
+    <minij.expected>7</minij.expected>
+    <!-- поддържан таргет; x86-64 управлява се от pom property-тата долу.
+         Всичко се делегира на projects/build.sh (виж "Смяна на таргета" там). -->
+    <minij.target>arm64</minij.target>
+    <minij.qemu>qemu-aarch64 -L /usr/aarch64-linux-gnu</minij.qemu>
+    <minij.repo>${project.basedir}/..</minij.repo>
+  </properties>
+
+  <build>
+    <sourceDirectory>${project.basedir}</sourceDirectory>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.1.0</version>
+        <executions>
+          <!-- 1) сглобяване на компилатора + компилиране на App.mj.
+               ВАЖНО: целият сценарий е в projects/build.sh, който сам:
+               - избира детерминистично JDK 17 (Debian default е 11),
+               - работи от repo-root (rules/ се resolve-ва спрямо CWD,
+                 същото прави test.sh) — всички пътища → absolute. -->
+          <execution>
+            <id>build-and-compile</id>
+            <phase>generate-resources</phase>
+            <goals><goal>exec</goal></goals>
+            <configuration>
+              <workingDirectory>${project.basedir}</workingDirectory>
+              <executable>bash</executable>
+              <arguments>
+                <argument>${project.basedir}/build.sh</argument>
+                <argument>${minij.target}</argument>
+                <argument>${project.build.directory}/app</argument>
+              </arguments>
+            </configuration>
+          </execution>
+          <!-- 2) изпълнение под qemu + проверка на exit кода -->
+          <execution>
+            <id>run-app</id>
+            <phase>verify</phase>
+            <goals><goal>exec</goal></goals>
+            <configuration>
+              <workingDirectory>${project.basedir}</workingDirectory>
+              <executable>bash</executable>
+              <arguments>
+                <argument>-c</argument>
+                <argument>
+                  ${minij.qemu} ${project.build.directory}/app; got=$$?;
+                  echo "  App.mj exit=$$got (очаквано ${minij.expected})";
+                  [ "$$got" = "${minij.expected}" ]
+                </argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
