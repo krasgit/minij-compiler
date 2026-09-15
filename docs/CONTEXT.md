@@ -51,8 +51,9 @@ regression + docs + commit + push.
   `ed21fa3` P3 instanceof/cast exact-class (obj4) → `6f056f7` P3 extends/super/subtype (obj5) →
   **`580c5fd` P3 vtable dispatch + override (обj6; README/ROADMAP вкл в същия комит)**
   → **`5a17f16` P3 static полета (обj7)`.** → **P3 явен super.method/field (обj8, HEAD)**
+  → **P3 `Foo[]` масиви от обекти (обj9; 27/27)**
 
-## Status (актуално към HEAD = 2934afc, регресия 26/26)
+## Status (актуално към HEAD = NEW, регресия 27/27)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
@@ -63,9 +64,11 @@ regression + docs + commit + push.
   **P3 наследяване `extends` + `super(...)` + subtype instanceof/cast (23/23 — obj5.mj)**;
   **P3 vtable dispatch + override (24/24 — obj6.mj)**;
   **P3 static полета (25/25 — obj7.mj)**;
-  **P3 явен `super.method()`/`super.field` (26/26 — obj8.mj)**.
-- ACTIVE: P3 в ход — static полета + super dispatch готови; остава **`Foo[]` насочване** (виж NEXT MOVE).
-- Regression: **26/26 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+  **P3 явен `super.method()`/`super.field` (26/26 — obj8.mj)**;
+  **P3 масиви от обекти `Foo[]` (27/27 — obj9.mj, без frontend промени — vtable+fields
+  от obj6-obj8 покриват всичко; проверки с ObjArrProbe2)**.
+- ACTIVE: P3 обекти e **завършен** — остава `static void` за main (виж NEXT MOVE).
+- Regression: **27/27 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
   str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
   **obj** (`5/7/6/12`, `1/2/3/1`, exit 2),
@@ -75,19 +78,22 @@ regression + docs + commit + push.
   **obj5** (`15/7/1/1/0/1/7/7/2/1/4/0`, exit 77),
   **obj6** (`18/64/8/11/-1/64`, exit 34),
   **obj7** (`2/2/3/4/100/100/107/2/2`, exit 42),
-  **obj8** (`3/8/10/6/96/996/11/102/15/15`, exit 42).
+  **obj8** (`3/8/10/6/96/996/11/102/15/15`, exit 42),
+  **obj9** (`28/11/1/15/25/5/5/4`, exit 42).
 
 ## NEXT MOVE (при "continue")
 
-P3 super dispatch е **завършен** → следва:
-1. **`Foo[]` масиви от обекти** — по `elemOf("Foo[]")`→`"ptr"` трябва да работят (alloc_ptr клетки,
-   `new Foo[n]`, `a[i].m()`, `a[i].fld`). Пример `examples/obj9.mj` (масив от Box/Shape + override
-   dispatch през себе-то); проверка за операторите `a[i].method()` (AmbigName [a, i, method]? или
-   ArrayAccessExpression + MethodInvocation target) ПЪРВО с probe.
-2. След това: `static void` за main без return (или следващ P4/P3.5 решение).
+P3 `Foo[]` масиви са **завършени** (obj9, 27/27, нулеви frontend промени) → следва:
+1. **`static void` за main без return** (или всяка void функция): `void f() {...}` без return
+   трябва да понесе void-return (поддръжката на `return;` в void вече се прави). TODO:
+   - `static void main()` — `main` в crt0/runtime чака `int` в x0? провери `runtime/crt0.S`
+     (обвивката чете `$?` от main-а) — може нужен конвенция "main връща 0".
+   - Frontend: метод с `retJt=="void"` вече има void-return правила (Reader/SsaLower), но
+     `static int main()` е твърдо закотвен в подсистемите — потърси `main` специал-касе-а.
+2. След това: P4-Control / P3.5 GC решение (слота е в docs/ROADMAP.md).
 
 Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `run_tests.sh`
-(26/26→N/N) → README/ROADMAP/CONTEXT → комит+push.
+(27/27→N/N) → README/ROADMAP/CONTEXT → комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
 
@@ -192,6 +198,15 @@ P3 super dispatch е **завършен** → следва:
   layout, същите offsets) + static fallback в super-веригата; read в `expr()`, write в `handleAssign`.
   Helper-и: `isSuperNode(o,"ClassSimpleName")`. Проверки в MIR: `B_useSuper` → `call A_g:i32`,
   `C_twoLevel` → `call B_g:i32`.
+- **P3 `Foo[]` масиви от обекти (obj9, проверено, НУЛЕВИ frontend промени)**: `arr[i].f` =
+  **`FieldAccessExpression(lhs=ArrayAccessExpression, fieldName)`**; `arr[i].m()` =
+  **`MethodInvocation(target=ArrayAccessExpression)`** (НЕ AmbigName [a,i,m]!). Работи всичко през
+  съществуващото: `elemOf("Foo[]")`→`"ptr"` (branch `classIndex.containsKey(c)`), `new Foo[n]` →
+  `alloc_ptr`+`st_hdr`, `arr[i]=new Foo()` и `arr[i].f=v` → `chk+lea_ptr+st_ptr`,
+  `javaTypeOf(ArrayAccessExpression)` дава елементния Java-тип ("Foo") → `fieldAddrFrom(arr[i], f)`
+  работи, `classSigs` → virtual `vt_ref`+`icall` диспечва по динамичния клас (override „през
+  себе-то": `arr[2].legend()` на Box елемент → `Shape_legend`→`this.mark()`→`Box_mark`). Проверено с
+  ObjArrProbe2 (AST форми) + obj9 compile/run.
 - **Emitter spill bugfix (с този комит, ВАЖНО)**: `saveSpills` записваше обратно само РЕЗУЛТАТА на
   инструкцията. Phi-move-ите от PhiElim са 2-арг `MOV_<s>(val, phiDst)` — dst (phi) стои в `args[1]`.
   Ако phi-то е spill-нато, стойността оставаше в скретч-temp и се губи при jump-а (join-блокчето чете
@@ -284,10 +299,10 @@ P3 super dispatch е **завършен** → следва:
 
 ## Testing
 
-- `cd /tmp/opencode && bash run_tests.sh` → build + 26 теста; текущ резултат **26/26**.
+- `cd /tmp/opencode && bash run_tests.sh` → build + 27 теста; текущ резултат **27/27**.
   (Може да отнеме >2 мин — таймаут-ът на bash tool трябва да е ~400s.)
 - Тест функции: `run name src exitcode`, `run_out name src exitcode $'expected\nout\n'`;
-  добавяне на нов пример = `run_out obj8 "$DIR/examples/obj8.mj" 42 $'3\n8\n10\n6\n96\n996\n11\n102\n15\n15\n'`
+  добавяне на нов пример = `run_out obj9 "$DIR/examples/obj9.mj" 42 $'28\n11\n1\n15\n25\n5\n5\n4\n'`
   + обновяват се броя и README/ROADMAP/CONTEXT.
 - Примерни файлове за multi-D: `examples/md.mj`. OOB multi-D (m7/m8 .mj в /tmp/opencode) → exit 134.
 - Отделни минимални програми за бисouter (m1..m8.mj) стоят в /tmp/opencode; не се комитват.
@@ -307,7 +322,9 @@ P3 super dispatch е **завършен** → следва:
   statics: staticFields (FieldDeclaration.isStatic, init→error), staticField/staticAddr/
   staticAddrField/ambigStatic, static fallbacks в fieldAddr/fieldAddrFrom/fieldThis, expr(ThisReference);
   super: superCall (SuperclassMethodInvocation, direct call по super-верига + resolveSig),
-  superFieldAddr (SuperclassFieldAccessExpression read+write), isSuperNode**).
+  superFieldAddr (SuperclassFieldAccessExpression read+write), isSuperNode**;
+  **Foo[]: без промени — elemOf `classIndex` branch + FieldAccessExpression/classSigs с
+  ArrayAccessExpression база (обj9, проверено с ObjArrProbe2)**).
 - `common/Emitter.java` — spill support (spillTemp/spillBytes/stemp/slotMem/spillLoad/spillStore/
   prepareSpills/saveSpills/maxSpillBytes), x86 ptr→movq, template interpreter + Ctx,
   **`${cargs}` loop-list (base=1), vtables в `.data` (R_AARCH64_RELATIVE → не .rodata),
@@ -325,7 +342,7 @@ P3 super dispatch е **завършен** → следва:
   k_println_i32`, `k_newline`, **`k_string_equals`/`k_string_concat`**), mm_alloc, syscalls.
 - `examples/*.mj` — hello, gcd, fib, forloop, dowhile, ternary, switch, print, dbl, lng, mix,
   arrays, oob, str, str2, md, str3, obj, obj2, **obj3**, **obj4**, **obj5**, **obj6**,
-  **obj7**, **obj8**, native.
+  **obj7**, **obj8**, **obj9**, native.
 - `/tmp/opencode/run_tests.sh` — regression harness (26 теста; беше оправен след corrupt edit:
   `run_out` без `}`/без `got=$?`, орязани expected-out за dbl/arrays/md).
 - `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD/SE/**OProbe**/OProbe2/OProbe3/**StProbe**/

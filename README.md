@@ -93,7 +93,7 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **26/26 теста на arm64**
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **27/27 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
@@ -105,7 +105,8 @@ obj4 `1/0/0/1`, `7/9/0`, exit 16 (P3 instanceof/cast),
 obj5 `15/7/1/1/0/1/7/7/2/1/4/0`, exit 77 (P3 extends/super/subtype),
 obj6 `18/64/8/11/-1/64`, exit 34 (P3 vtable dispatch/override),
 obj7 `2/2/3/4/100/100/107/2/2`, exit 42 (P3 static полета),
-obj8 `3/8/10/6/96/996/11/102/15/15`, exit 42 (P3 super.method/field); всеки — exit code + stdout чек).
+obj8 `3/8/10/6/96/996/11/102/15/15`, exit 42 (P3 super.method/field);
+obj9 `28/11/1/15/25/5/5/4`, exit 42 (P3 масив от обекти); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -244,6 +245,23 @@ static fallback в super-веригата. Това позволява override-
 `return super.g() + 1` във `B.g()` вика `A_g`, докато `a.f()`/`b.f()`/`c.f()` диспечват виртуално
 по динамичния клас. Пример `examples/obj8.mj` (A/B/C йерархия с override на `g`, `super.g()` на
 1 и 2 нива, `super.v = super.v + 5` write+read) → `3/8/10/6/96/996/11/102/15/15`, exit 42.
+
+### Обекти / класове (P3, масиви от обекти `Foo[]`)
+
+`Foo[]` работи напълно през вече изградената инфраструктура (P2 multi-D + P3 vtable) — без нови
+ops. `elemOf("Foo[]")` дава `"ptr"`, затова `new Foo[n]` слиза до `alloc_ptr`/`st_hdr` (клетките
+са 8-byte указатели). Индексиран достъп по клетка (`a[i]` read/write) е обичайният
+`chk + lea_ptr + ld_ptr`/`st_ptr` (запис на `new Foo()` в клетка също минава `handleAssign`
+`ArrayAccessExpression` → `st_ptr`). Janino пази `a[i].f` като **`FieldAccessExpression` с
+`lhs = ArrayAccessExpression`** и `a[i].m()` като **`MethodInvocation` с `target =
+ArrayAccessExpression`** — `javaTypeOf(ArrayAccessExpression)` връща елементния Java-тип ("Foo"),
+затова `fieldAddrFrom(arr[i], name)` адресира полето, а `classSigs` → virtual `vt_ref`+`icall`
+диспечва метода по динамичния клас на елемента (override през `legend()`→`mark()` на себе-то).
+`arr.length` е обичайният `AmbiguousName [arr, length]`. Работят елементите и в цикъл с променлива
+индекс (инициализация `arr[i] = new Shape()`, `arr[i].tag = i*7` write+read, виртуални повиквания).
+Пример `examples/obj9.mj` (масив `Shape[]`, `arr[2] = new Box(5)` — последващите
+`arr[2].legend()`/`.area()`/`.mark()` диспечват в Box) →
+`28/11/1/15/25/5/5/4`, exit 42.
 
 ## Пътна карта
 

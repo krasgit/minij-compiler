@@ -106,8 +106,8 @@
 > (`h.next.next.v` — 4 ids), после `ld_<ft>`/`st_<ft>`. Типове: `irType`/`javaTypeOf`/
 > `inferType`/`elemOf` разпознават клас-имена → `ptr`. Regalloc/Emitter непроменени освен
 > новите ops. Пример `examples/obj.mj`; регресия **19/19 (arm64)**; x86 textual emit OK.
-> Регресия сега: **26/26 (arm64)** — obj, obj2, obj3, obj4, obj5, obj6, obj7, obj8 добавени.
-> Остатък P3: `Foo[]` насочване (тест с пример).
+> Регресия сега: **27/27 (arm64)** — obj, obj2, obj3, obj4, obj5, obj6, obj7, obj8, obj9 добавени.
+> Остатък P3: `static void` main без `return` (или следващ P4/P3.5 решение).
 >
 > **P3 конструктори + `this` chaining (DONE, пример `examples/obj3.mj`, регресия 21/21):**
 > `new Foo(args)` → alloc_obj+st_hdr + call `Foo_init[<_irparams>]` ([obj, args…], overload
@@ -170,8 +170,19 @@
 > като `this.f` (наследените полета са на същите offsets в subclass layout-а) + static fallback в
 > super-веригата; read-ът e в `expr()`, write-ът в `handleAssign`. Проверка: `B_useSuper` →
 > `call A_g`, `C_twoLevel` → `call B_g` (директно), докато `a.f()/b.f()/c.f()` продължават да
-> диспечват виртуално по динамичния клас. Остатък P3: `Foo[]` масиви от обекти (по `elemOf`→ptr
-> трябва да работят; тест с пример).
+> диспечват виртуално по динамичния клас.
+>
+> **P3 масиви от обекти `Foo[]` (DONE, пример `examples/obj9.mj`, регресия 27/27):**
+> НУЛЕВИ frontend промени — комбинацията от P2 multi-D (ptr клетки) и P3 vtable/fields покрива
+> всичко. `elemOf("Foo[]")` вече дава `"ptr"` (branch `classIndex.containsKey` в `elemOf`), затова
+> `new Foo[n]` = `alloc_ptr`+`st_hdr`; `arr[i] = new Foo()` и `arr[i].f = v` = `chk+lea_ptr+st_ptr`.
+> AST: `arr[i].f` = **`FieldAccessExpression(lhs=ArrayAccessExpression, fieldName)`**,
+> `arr[i].m()` = **`MethodInvocation(target=ArrayAccessExpression)`** (НЕ AmbigName [a,i,m]);
+> `javaTypeOf(ArrayAccessExpression)` връща елементния Java-тип ("Foo"), затова
+> `fieldAddrFrom(arr[i], f)` адресира полето, а `classSigs` → virtual `vt_ref`+`icall` диспечва
+> метода по динамичния клас на елемента („през себе-то" `legend()`→`mark()`). AST-формите са
+> потвърдени с ObjArrProbe2. Пример: `Shape[]` с `arr[2]=new Box(5)` → `arr[2].legend()/area()/
+> mark()` диспечват в Box → `28/11/1/15/25/5/5/4`, exit 42.
 >
 > **P3 методи + overloads (DONE, пример `examples/obj2.mj`, регресия 20/20):** instance-методи
 > `obj.m(args)` + static `Cls.m(args)` диспеч без vtable. `cls()` гради `MethSig` DB в

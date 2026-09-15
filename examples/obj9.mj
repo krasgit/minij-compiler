@@ -1,0 +1,42 @@
+class Shape {
+    int tag;
+    int mark() { return 1; }
+    int legend() { return 10 + mark(); }
+    int area() { return 100; }
+}
+
+class Box extends Shape {
+    int size;
+    Box(int s) { size = s; }
+    int mark() { return size; }
+    int area() { return size * size; }
+}
+
+class T {
+    static int main() {
+        Shape[] arr = new Shape[4];
+        int n = arr.length;
+        int i = 0;
+        while (i < n) {
+            arr[i] = new Shape();
+            arr[i].tag = i * 7;
+            i = i + 1;
+        }
+        arr[2] = new Box(5);
+        int sum = 0;
+        i = 0;
+        while (i < n) {
+            sum = sum + arr[i].tag;
+            i = i + 1;
+        }
+        k_println_i32(sum);
+        k_println_i32(arr[0].legend());
+        k_println_i32(arr[0].mark());
+        k_println_i32(arr[2].legend());
+        k_println_i32(arr[2].area());
+        k_println_i32(arr[2].mark());
+        k_println_i32(((Box) arr[2]).size);
+        k_println_i32(n);
+        return 42;
+    }
+}
