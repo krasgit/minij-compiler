@@ -391,6 +391,10 @@ emit lea_ptr(a, i) {
 emit lea_field(a, o) {
     add ${dst}, ${a}, ${o}
 }
+emit lea_static() {
+    adrp x9, ${name}
+    add $dst, x9, :lo12:${name}
+}
 emit ld_i32(a) {
     ldr $dst, [${a}]
 }

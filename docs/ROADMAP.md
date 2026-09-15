@@ -106,8 +106,8 @@
 > (`h.next.next.v` — 4 ids), после `ld_<ft>`/`st_<ft>`. Типове: `irType`/`javaTypeOf`/
 > `inferType`/`elemOf` разпознават клас-имена → `ptr`. Regalloc/Emitter непроменени освен
 > новите ops. Пример `examples/obj.mj`; регресия **19/19 (arm64)**; x86 textual emit OK.
-> Регресия сега: **24/24 (arm64)** — obj, obj2, obj3, obj4, obj5, obj6 добавени.
-> Остатък P3: **static полета**, `super.method()` явен dispatch, `Foo[]` насочване.
+> Регресия сега: **25/25 (arm64)** — obj, obj2, obj3, obj4, obj5, obj6, obj7 добавени.
+> Остатък P3: `super.method()` явен dispatch, `Foo[]` насочване.
 >
 > **P3 конструктори + `this` chaining (DONE, пример `examples/obj3.mj`, регресия 21/21):**
 > `new Foo(args)` → alloc_obj+st_hdr + call `Foo_init[<_irparams>]` ([obj, args…], overload
@@ -146,6 +146,19 @@
 > при load, store в RO сегмент = segfault в `ldso/dynlink.c do_relocs`; **(2)** Emitter `${cargs}`
 > loop-лист + RuleParser `args...` (pattern име + any); **(3)** bind-цикълът клипва при
 > `i < args.size()` (без out-of-bounds за `pat` по-дълъг от args).
+>
+> **P3 static полета (DONE, пример `examples/obj7.mj`, регресия 25/25):**
+> `collectClass` отделя `static` декларациите (елементът е `Java.FieldDeclaration`, `.isStatic()`)
+> от instance layout-a в `staticFields: cls → field → {irType, symbol, javaType}`; инициализатори
+> → грешка (не се поддържат). Съхранението е извън обектите: нов `.statics` IR блок
+> (`symbol : size`), `Emitter` го пуска в `.bss` (`p2align 3` + `.globl <cls>_<name>` + `.zero N`).
+> Достъп = нов op `lea_static` (0-арг, носи името като call: `adrp x9, sym`/`add $dst, x9,
+> :lo12:sym` arm64; `leaq sym(%rip)` x86) + обичайния `ld_<t>`/`st_<t>`. Пътища: `Foo.count`/
+> `f.count` (2-ид AmbigName → `ambigStatic` в `fieldAddr`), bare `count` (fallback в `fieldThis` —
+> работи и в instance, и в static метод, защото `curClass` сенася при всички `MethodDeclarator`-и),
+> `this.count`/`expr.count` (static fallback в `fieldAddrFrom`); наследяване през super-верига
+> (`staticField()` walk-ва `classSuper`). `inferType` за 2-ид AmbigName resolve-ва статик преди
+> generic `i32`. Попътно: **bare `this` като стойност** → `load allocaOf["this"]` (беше konst 0).
 >
 > **P3 методи + overloads (DONE, пример `examples/obj2.mj`, регресия 20/20):** instance-методи
 > `obj.m(args)` + static `Cls.m(args)` диспеч без vtable. `cls()` гради `MethSig` DB в

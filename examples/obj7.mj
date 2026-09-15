@@ -1,0 +1,39 @@
+class T {
+    int id;
+    static int counter;
+    static long total;
+    static T last;
+
+    T(int n) {
+        id = n;
+        counter = counter + 1;
+        total = total + 20000000000L;
+        last = this;
+    }
+
+    static int next(int step) {
+        counter = counter + step;
+        return counter;
+    }
+
+    int myId() { return id + counter; }
+
+    static int main() {
+        T a = new T(1);
+        T b = new T(2);
+        k_println_i32(T.counter);
+        k_println_i32(counter);
+        k_println_i32(a.myId());
+        k_println_i32(b.myId());
+        b.counter = 100;
+        k_println_i32(T.counter);
+        k_println_i32(a.counter);
+        k_println_i32(next(7));
+        T l = T.last;
+        int li = l.myId() - counter;
+        k_println_i32(li);
+        int tt = (int) (T.total / 20000000000L);
+        k_println_i32(tt);
+        return 42;
+    }
+}

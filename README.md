@@ -93,7 +93,7 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **24/24 теста на arm64**
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **25/25 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
@@ -103,7 +103,8 @@ obj2 `6/7/7/17/117`, `7/14/8`, exit 10 (P3 methods/overloads),
 obj3 `3/30/10/20`, `5/6/100/15`, exit 26 (P3 ctors/this),
 obj4 `1/0/0/1`, `7/9/0`, exit 16 (P3 instanceof/cast),
 obj5 `15/7/1/1/0/1/7/7/2/1/4/0`, exit 77 (P3 extends/super/subtype),
-obj6 `18/64/8/11/-1/64`, exit 34 (P3 vtable dispatch/override); всеки — exit code + stdout чек).
+obj6 `18/64/8/11/-1/64`, exit 34 (P3 vtable dispatch/override),
+obj7 `2/2/3/4/100/100/107/2/2`, exit 42 (P3 static полета); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -214,6 +215,21 @@ DB за всички класове) и `emitMethods` (bodies). Инстанс-�
 segfault-ва динамичния линкер (даде се с gdb bt в `ldso/dynlink.c do_relocs`). Пример
 `examples/obj6.mj` (Shape/Box, `legend()` вика виртуалния `mark()`, override на `mark`/`area`,
 `(Box) s1` cast след vtable) → `18/64/8/11/-1/64`, exit 34.
+
+### Обекти / класове (P3, static полета)
+
+`static` полетата вече са извън object layout-а: `collectClass` ги отделя в `staticFields`
+(`className → field → {irType, symbol, javaType}`) и не консумират offset; съхранението е в нов
+`.statics` IR блок (`symbol : size`), който `Emitter` пуска в `.bss` с `.globl <cls>_<name>`.
+Достъпът слиза до нов op `lea_static` (arm64 `adrp/add :lo12:<sym>`, x86 `leaq sym(%rip)`), следван
+от `ld_<t>`/`st_<t>`. Работят всички форми: `Foo.count` (клас-квалифициран), bare `count`
+(и в instance, и в static метод — през super-веригата на текущия клас), `f.count`/`this.count`
+(обект-квалифициран fallback в `fieldAddrFrom`); суперкласов статик се наследява
+(`staticField()` walk-ва `classSuper`). Инициализатори на static полета → грешка (не са
+поддържани още). Попътно: **bare `this` като стойност** (`last = this`) вече се снижава
+(load от `allocaOf["this"]`), а не тихо дава 0. Пример `examples/obj7.mj` (споделен
+`static int counter`/`long total`/`T last` между инстанции + `T.counter`, `b.counter`, bare `counter`
+в static `next()`, `(int) (T.total / 20000000000L)`) → `2/2/3/4/100/100/107/2/2`, exit 42.
 
 ## Пътна карта
 

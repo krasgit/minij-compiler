@@ -454,6 +454,9 @@ emit lea_field(a, o) {
     movq ${a}, $dst
     addq ${o}, $dst
 }
+emit lea_static() {
+    leaq ${name}(%rip), $dst
+}
 emit ld_i32(a) {
     movl (${a}), $dst
 }

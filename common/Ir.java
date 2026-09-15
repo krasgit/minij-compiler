@@ -23,10 +23,17 @@ public class Ir {
         public String label;
         public List<String> syms = new ArrayList<>();
     }
+    public static class Static {
+        public String symbol;
+        public int size;
+        public Static() {}
+        public Static(String s, int n) { symbol = s; size = n; }
+    }
     public static class Program {
         public String module = "stdin", target = "x86-64";
         public List<Func> funcs = new ArrayList<>();
         public List<VTable> vtables = new ArrayList<>();
+        public List<Static> statics = new ArrayList<>();
         public DebugInfo debug = new DebugInfo();
     }
     public static class DebugInfo {
@@ -82,6 +89,12 @@ public class Ir {
                 }
                 sb.append("]\n\n");
             }
+            if (!p.statics.isEmpty()) {
+                sb.append(".statics [\n");
+                for (Static st : p.statics)
+                    sb.append("  ").append(st.symbol).append(" : ").append(st.size).append("\n");
+                sb.append("]\n\n");
+            }
             for (Func f : p.funcs) func(f);
             if (!p.debug.locations.isEmpty()) {
                 sb.append(".locations [\n");
@@ -119,8 +132,8 @@ public class Ir {
                     sb.append(" [").append(bn(v.args.get(i))).append(": %").append(id(v.args.get(i+1))).append("]");
                 sb.append(d).append("\n"); return;
             }
-            if (o.equals("call")||o.startsWith("CALL_")) {
-                String kw = o.startsWith("CALL_") ? o : "call";
+            if (o.equals("call")||o.startsWith("CALL_")||o.equals("lea_static")) {
+                String kw = o.startsWith("CALL_") ? o : o.equals("lea_static") ? o : "call";
                 String nm = v.name != null ? v.name : "?";
                 sb.append("    %").append(id(v)).append(" = ").append(kw).append(" ").append(nm).append(":").append(v.type).append("(");
                 for (int i=0;i<v.args.size();i++) { if (i>0) sb.append(", "); sb.append("%").append(id(v.args.get(i))); }
@@ -167,6 +180,7 @@ public class Ir {
                 if (ln.startsWith(".debug_declarations")) { readDecl(); continue; }
                 if (ln.startsWith(".debug_vars")) { readVars(); continue; }
                 if (ln.startsWith(".vtables")) { readVtables(); continue; }
+                if (ln.startsWith(".statics")) { readStatics(); continue; }
                 if (ln.startsWith(".locations")) { readLoc(); continue; }
                 if (ln.startsWith(".func")) { readFunc(); continue; }
                 next();
@@ -213,6 +227,15 @@ public class Ir {
                 String rest = ln.substring(eq + 1).trim().replace(" ", "");
                 if (!rest.isEmpty()) for (String s : rest.split(",")) if (!s.isEmpty()) vt.syms.add(s);
                 p.vtables.add(vt);
+            } next(); }
+        void readStatics() { next();
+            while (!peek().trim().startsWith("]")) {
+                String ln = next().trim(); if (ln.isEmpty()) continue;
+                int c = ln.indexOf(':');
+                Static st = new Static();
+                st.symbol = ln.substring(0, c).trim();
+                st.size = Integer.parseInt(ln.substring(c + 1).trim());
+                p.statics.add(st);
             } next(); }
         void readLoc() { next();
             while (!peek().trim().startsWith("]")) {
@@ -298,7 +321,7 @@ public class Ir {
             if (v.op.equals("alloca")) { v.type = parts.length>1?parts[1]:"i32"; return v; }
             if (v.op.startsWith("CONST_") || v.op.equals("const")) { v.type=parts[1]; v.imm=Long.parseLong(parts[2]); return v; }
             if (v.op.startsWith("PARAM_") || v.op.equals("param")) { v.type=parts[1]; v.imm=Long.parseLong(parts[2]); return v; }
-            if (v.op.startsWith("CALL_") || v.op.equals("call")) {
+            if (v.op.startsWith("CALL_") || v.op.equals("call") || v.op.equals("lea_static")) {
                 int lp = s.indexOf('('), rp = s.lastIndexOf(')');
                 if (lp > 0 && rp > lp) {
                     String pre = s.substring(0, lp).trim();

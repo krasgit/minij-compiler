@@ -34,7 +34,7 @@ public class Emitter {
     }
 
     void rodata() {
-        if (poolLabels.isEmpty() && prog.vtables.isEmpty()) return;
+        if (poolLabels.isEmpty() && prog.vtables.isEmpty() && prog.statics.isEmpty()) return;
         // vtables hold relocated symbol addresses → must live in a WRITABLE
         // segment: PIE ldso applies R_AARCH64_RELATIVE at load time; putting
         // them in .rodata segfaults the dynamic linker (read-only store fault).
@@ -57,6 +57,15 @@ public class Emitter {
             out.append(".LC" ).append(Integer.parseInt(e.getValue().substring(3)))
                .append(": .").append(v.op.startsWith("CONST_f") && v.type.equals("f32") ? "long" : "quad")
                .append(" ").append(poolBits.get(v)).append("\n");
+        }
+        if (!prog.statics.isEmpty()) {
+            out.append("    .section .bss\n");
+            out.append("    .p2align 3\n");
+            for (Ir.Static st : prog.statics) {
+                out.append("    .globl ").append(st.symbol).append("\n");
+                out.append(st.symbol).append(":\n");
+                out.append("    .zero ").append(st.size).append("\n");
+            }
         }
     }
 

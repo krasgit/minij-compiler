@@ -17,6 +17,8 @@ public class AstLowerMain {
     Map<String, Integer> classIndex = new LinkedHashMap<>();      // className → малко int (в header-а)
     Map<String, Integer> classSizes = new LinkedHashMap<>();      // className → общ byte size с header
     Map<String, Map<String, Object[]>> classFields = new LinkedHashMap<>(); // className → field → {irType, byteOffset, javaType}
+    List<Ir.Static> statics = new ArrayList<>();         // статични полета (data symbols) за .bss
+    Map<String, Map<String, Object[]>> staticFields = new LinkedHashMap<>(); // className → field → {irType, symbol, javaType}
     Map<String, List<MethSig>> classMethods = new LinkedHashMap<>(); // "cls::name" → сигнатури (overloads)
     Map<String, String> classSuper = new LinkedHashMap<>();       // className → superclassName (null за root)
     Map<String, List<String>> classSlots = new LinkedHashMap<>(); // className → ordered vtable slot keys (super-first)
@@ -49,6 +51,7 @@ public class AstLowerMain {
         if (types != null) for (Object td : types) {
             if (td instanceof Java.ClassDeclaration cd) m.emitMethods(cd);
         }
+        m.prog.statics.addAll(m.statics);
         String out = Ir.Writer.print(m.prog);
         if (args[1].equals("-")) System.out.print(out); else Files.writeString(Path.of(args[1]), out);
     }
@@ -136,10 +139,20 @@ public class AstLowerMain {
             String jt = getStr(mb, "type");
             if (jt == null) continue;
             String ft = irType(jt);
-            int a = ft.equals("i32") ? 4 : 8;
+            boolean isStatic = mb instanceof Java.FieldDeclaration fd && fd.isStatic();
             Object vds = get(mb, "variableDeclarators");
             if (vds instanceof Object[] arr) for (Object vd : arr) {
                 String name = getStr(vd, "name");
+                if (isStatic) {
+                    Object ini = get(vd, "initializer");
+                    if (ini != null)
+                        throw new RuntimeException("static field initializers not supported yet: " + cn + "." + name);
+                    String sym = cn + "_" + name;
+                    statics.add(new Ir.Static(sym, ft.equals("i32") ? 4 : 8));
+                    staticFields.computeIfAbsent(cn, k -> new LinkedHashMap<>()).put(name, new Object[]{ ft, sym, jt });
+                    continue;
+                }
+                int a = ft.equals("i32") ? 4 : 8;
                 off = (off + a - 1) & ~(a - 1);
                 fs.put(name, new Object[]{ ft, off, jt });
                 off += a;
@@ -307,7 +320,11 @@ public class AstLowerMain {
         if (e instanceof Java.StringLiteral) return "ptr";
         if (e instanceof Java.FloatingPointLiteral) return "f64";
         if (e instanceof Java.AmbiguousName an) {
-            if (an.identifiers.length > 1) return "i32";  // x.length
+            if (an.identifiers.length > 1 && an.identifiers[1].equals("length")) return "i32";
+            if (an.identifiers.length > 1) {
+                Object[] sf = m.ambigStatic(an);
+                if (sf != null) return m.irType((String) sf[2]);
+            }
             String s = m.varType.get(an.identifiers[0]);
             return s == null ? "i32" : s;
         }
@@ -761,6 +778,31 @@ public class AstLowerMain {
 
     static class FieldAddr { Ir.Value addr; String ir; String jt; FieldAddr(Ir.Value a, String i, String j){addr=a; ir=i; jt=j;} }
 
+    /** Статично поле <name> на клас <cls> (или негов наследник през super-веригата). */
+    Object[] staticField(String cls, String name) {
+        while (cls != null) {
+            Map<String, Object[]> fs = staticFields.get(cls);
+            if (fs != null) { Object[] f = fs.get(name); if (f != null) return f; }
+            cls = classSuper.get(cls);
+        }
+        return null;
+    }
+    /** Адрес на статично поле: lea_static <sym> (не зависи от обект). */
+    Ir.Value staticAddr(Object[] f, int dbg) {
+        Ir.Value v = emit("lea_static", "ptr"); v.name = (String) f[1]; v.dbg = dbg;
+        return v;
+    }
+    FieldAddr staticAddrField(Object[] f, int dbg) {
+        return new FieldAddr(staticAddr(f, dbg), (String) f[0], (String) f[2]);
+    }
+    /** Статично поле зад 2-иден AmbiguousName: `Foo.count` (клас) или `f.count` (обектна променлива). */
+    Object[] ambigStatic(Java.AmbiguousName an) {
+        if (an.identifiers.length != 2) return null;
+        Object[] f = classIndex.containsKey(an.identifiers[0]) ? staticField(an.identifiers[0], an.identifiers[1]) : null;
+        if (f == null) { String cj = varJType.get(an.identifiers[0]); if (cj != null) f = staticField(cj, an.identifiers[1]); }
+        return f;
+    }
+
     static class MethSig {
         String cn, name, symbol, retIr, retJt;
         String[] pjts, pirs;
@@ -933,7 +975,11 @@ public class AstLowerMain {
         String bj = javaTypeOf(base);
         Map<String, Object[]> fs = bj == null || !classIndex.containsKey(bj) ? null : classFields.get(bj);
         Object[] f = fs == null ? null : fs.get(nm);
-        if (f == null) return null;
+        if (f == null) {
+            Object[] sf = bj == null ? null : staticField(bj, nm);
+            if (sf != null) return staticAddrField(sf, -1);
+            return null;
+        }
         Ir.Value v;
         if (base instanceof Java.ThisReference) {
             Ir.Value al = allocaOf.get("this");
@@ -955,9 +1001,12 @@ public class AstLowerMain {
     FieldAddr fieldThis(String name) {
         if (curClass == null) return null;
         Map<String, Object[]> fs = classFields.get(curClass);
-        if (fs == null) return null;
-        Object[] f = fs.get(name);
-        if (f == null) return null;
+        Object[] f = fs == null ? null : fs.get(name);
+        if (f == null) {
+            Object[] sf = staticField(curClass, name);
+            if (sf != null) return staticAddrField(sf, -1);
+            return null;
+        }
         Ir.Value al = allocaOf.get("this");
         if (al == null) return null;
         Ir.Value v = emit("load", al.type, al); v.dbg = -1;
@@ -970,6 +1019,8 @@ public class AstLowerMain {
      *  указател на var-а и прекосява prefix-полетата с lea_field+ld_ptr. */
     FieldAddr fieldAddr(Java.AmbiguousName an) {
         if (an.identifiers.length < 2) return null;
+        Object[] sf = ambigStatic(an);
+        if (sf != null) return staticAddrField(sf, tag(an));
         String[] ids = new String[an.identifiers.length];
         for (int i = 0; i < ids.length; i++) ids[i] = an.identifiers[i];
         String jt = varJType.get(ids[0]);
@@ -1012,6 +1063,12 @@ public class AstLowerMain {
     Ir.Value expr(Java.Rvalue e) {
 if (e == null) return konst(0, "i32", -1);
         if (e instanceof Java.ParenthesizedExpression pe) return expr(pe.value);
+        if (e instanceof Java.ThisReference tr) {
+            Ir.Value al = allocaOf.get("this");
+            if (al == null) throw new RuntimeException("this used outside instance method");
+            Ir.Value l = emit("load", al.type, al); l.dbg = tag(e);
+            return l;
+        }
         if (e instanceof Java.IntegerLiteral lit) {
             String vs = lit.value;
             boolean isL = vs.endsWith("L") || vs.endsWith("l");
