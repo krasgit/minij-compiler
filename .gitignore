@@ -3,3 +3,34 @@ lib/*.jar
 t_*
 *.o
 *.class
+/gcd.alloc.mir
+/-.alloc.mir
+
+# repo-root build/test артефакти (от mc/test.sh директно в root) — не за commit
+/*.alloc.mir
+/*.ast
+/*.final.mir
+/*.lir
+/*.mir
+/*.opt.ssa
+/*.ssa
+/*.s
+/ast_*
+/ir_*
+/a64_*
+/arm64_*
+/arm_*
+/x86_*
+/a_*
+/a.out
+
+# Maven build (git третира target/ като output, не като източник)
+projects/target/
+projects/App.ast
+projects/App.final.mir
+projects/App.lir
+projects/App.mir
+projects/App.opt.ssa
+projects/App.ssa
+projects/App.alloc.mir
+*.buff
