@@ -349,6 +349,35 @@ emit CALL_f64(...) {
     movsd ${ret}, $dst
 }
 
+# ── P3: virtual dispatch ───────────────────────────────────────────────────
+emit vt_ref(a) {
+    movl (${a}), %r10d
+    leaq vtables(%rip), %r11
+    movslq %r10d, %r10
+    movq (%r11,%r10,8), $dst
+}
+emit ICALL_i32(fn, args...) {
+    for each ${cargs} i {
+        ${ws}[i] ${argregs}[i], ${cargs}[i]
+    }
+    callq *${fn}
+    movl ${ret}, $dst
+}
+emit ICALL_i64(fn, args...) {
+    for each ${cargs} i {
+        ${ws}[i] ${argregs}[i], ${cargs}[i]
+    }
+    callq *${fn}
+    movq ${ret}, $dst
+}
+emit ICALL_f64(fn, args...) {
+    for each ${cargs} i {
+        ${ws}[i] ${argregs}[i], ${cargs}[i]
+    }
+    callq *${fn}
+    movsd ${ret}, $dst
+}
+
 # ── P2: heap arrays over mm_alloc (header=[len:u32][pad], data at +8) ──────
 emit alloc_i32(c) {
     movslq ${c}, %r10

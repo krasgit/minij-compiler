@@ -19,9 +19,14 @@ public class Ir {
         public List<String[]> params = new ArrayList<>();
         public List<Block> blocks = new ArrayList<>();
     }
+    public static class VTable {
+        public String label;
+        public List<String> syms = new ArrayList<>();
+    }
     public static class Program {
         public String module = "stdin", target = "x86-64";
         public List<Func> funcs = new ArrayList<>();
+        public List<VTable> vtables = new ArrayList<>();
         public DebugInfo debug = new DebugInfo();
     }
     public static class DebugInfo {
@@ -65,6 +70,15 @@ public class Ir {
                     sb.append("  \"").append(e.getKey()).append("\" : versions=[");
                     for (int i=0;i<e.getValue().size();i++) { if (i>0) sb.append(", "); sb.append("%").append(id(e.getValue().get(i))); }
                     sb.append("]\n");
+                }
+                sb.append("]\n\n");
+            }
+            if (!p.vtables.isEmpty()) {
+                sb.append(".vtables [\n");
+                for (VTable v : p.vtables) {
+                    sb.append("  ").append(v.label).append(" = ");
+                    for (int i=0;i<v.syms.size();i++) { if (i>0) sb.append(", "); sb.append(v.syms.get(i)); }
+                    sb.append("\n");
                 }
                 sb.append("]\n\n");
             }
@@ -152,6 +166,7 @@ public class Ir {
                 if (ln.startsWith(".debug_positions")) { readPos(); continue; }
                 if (ln.startsWith(".debug_declarations")) { readDecl(); continue; }
                 if (ln.startsWith(".debug_vars")) { readVars(); continue; }
+                if (ln.startsWith(".vtables")) { readVtables(); continue; }
                 if (ln.startsWith(".locations")) { readLoc(); continue; }
                 if (ln.startsWith(".func")) { readFunc(); continue; }
                 next();
@@ -188,6 +203,16 @@ public class Ir {
                     if (s.startsWith("%")) { Value v = values.get(Integer.parseInt(s.substring(1))); if (v!=null) vals.add(v); }
                 }
                 p.debug.varVersions.put(name, vals);
+            } next(); }
+        void readVtables() { next();
+            while (!peek().trim().startsWith("]")) {
+                String ln = next().trim(); if (ln.isEmpty()) continue;
+                int eq = ln.indexOf('=');
+                VTable vt = new VTable();
+                vt.label = ln.substring(0, eq).trim();
+                String rest = ln.substring(eq + 1).trim().replace(" ", "");
+                if (!rest.isEmpty()) for (String s : rest.split(",")) if (!s.isEmpty()) vt.syms.add(s);
+                p.vtables.add(vt);
             } next(); }
         void readLoc() { next();
             while (!peek().trim().startsWith("]")) {

@@ -282,6 +282,36 @@ emit CALL_f64(...) {
     fmov $dst, ${ret}
 }
 
+# ── P3: virtual dispatch — vtable of the dynamic class, slot -> fn ptr ────
+emit vt_ref(a) {
+    ldr w11, [${a}]
+    adrp x9, vtables
+    add x9, x9, :lo12:vtables
+    add x11, x9, w11, uxtw #3
+    ldr $dst, [x11]
+}
+emit ICALL_i32(fn, ...) {
+    for each ${cargs} i {
+        ${ws}[i] ${argregs}[i], ${cargs}[i]
+    }
+    blr ${fn}
+    mov $dst, ${ret}
+}
+emit ICALL_i64(fn, args...) {
+    for each ${cargs} i {
+        ${ws}[i] ${argregs}[i], ${cargs}[i]
+    }
+    blr ${fn}
+    mov $dst, ${ret}
+}
+emit ICALL_f64(fn, args...) {
+    for each ${cargs} i {
+        ${ws}[i] ${argregs}[i], ${cargs}[i]
+    }
+    blr ${fn}
+    fmov $dst, ${ret}
+}
+
 # ── P2: heap arrays over mm_alloc (header=[len:u32][pad], data at +8) ──────
 emit alloc_i32(c) {
     sxtw x9, ${c}

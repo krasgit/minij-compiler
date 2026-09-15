@@ -140,8 +140,8 @@ public class RuleParser {
                     err("bad 'for each' line: " + t);
                 Stmt s = new Stmt(); s.kind = Stmt.FOR;
                 String list = p[2];
-                if (!list.equals("${args}") && !list.equals("${argregs}"))
-                    err("for each list must be ${args} or ${argregs}, got " + list);
+                if (!list.equals("${args}") && !list.equals("${argregs}") && !list.equals("${cargs}"))
+                    err("for each list must be ${args}, ${argregs} or ${cargs}, got " + list);
                 s.list = list.substring(2, list.length() - 1);
                 pos[0]++;
                 s.body = readBlock(lines, pos);
@@ -187,7 +187,9 @@ public class RuleParser {
         if (!inner.isEmpty()) {
             for (String a : inner.split(",")) {
                 String name = a.trim();
-                if (name.equals("...")) rule.any = true;
+                if (name.endsWith("...")) { rule.any = true; String b = name.substring(0, name.length() - 3).trim();
+                    if (!b.isEmpty()) rule.pat.add(b); }
+                else if (name.equals("...")) rule.any = true;
                 else rule.pat.add(name);
             }
         }

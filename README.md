@@ -93,7 +93,7 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **23/23 теста на arm64**
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **24/24 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
@@ -102,7 +102,8 @@ obj `5/7/6/12`, `1/2/3/1`, exit 2 (P3 classes),
 obj2 `6/7/7/17/117`, `7/14/8`, exit 10 (P3 methods/overloads),
 obj3 `3/30/10/20`, `5/6/100/15`, exit 26 (P3 ctors/this),
 obj4 `1/0/0/1`, `7/9/0`, exit 16 (P3 instanceof/cast),
-obj5 `15/7/1/1/0/1/7/7/2/1/4/0`, exit 77 (P3 extends/super/subtype); всеки — exit code + stdout чек).
+obj5 `15/7/1/1/0/1/7/7/2/1/4/0`, exit 77 (P3 extends/super/subtype),
+obj6 `18/64/8/11/-1/64`, exit 34 (P3 vtable dispatch/override); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -193,10 +194,26 @@ DB за всички класове) и `emitMethods` (bodies). Инстанс-�
 затваряне на sub по super (едноблокова OR-верига от `cmpeq`); несъвместим cast връща null.
 Попътно: нови ALU rules `AND_i32`/`OR_i32` (arm `and`/`orr`, x86 movl/andl/orl) и fix в
 `Emitter.saveSpills` — 2-арг phi-move `MOV(val, phi)` с spill-нат phi записва стойността обратно
-в слота на phi-то (иначе join чете stale стойност). Диспечът остава **статичен** (без
-vtable/override засега). Пример `examples/obj5.mj` (A/B/C верига, `super(7)`/`super()`/`super(4)`,
+в слота на phi-то (иначе join чете stale стойност). Диспечът засега е **статичен**. Пример
+`examples/obj5.mj` (A/B/C верига, `super(7)`/`super()`/`super(4)`,
 наследени полета и методи, subtype `instanceof`/cast, `(C) b` → null) →
 `15/7/1/1/0/1/7/7/2/1/4/0`, exit 77.
+
+### Обекти / класове (P3, vtable dispatch + override)
+
+Виртуалните повиквания вече диспечват по **динамичния** клас: фронтендът строи per-клас vtable
+(`buildVtables` в `AstLowerMain`) — списък от slot-ове = super-списъкът (като prefix) + собствените
+не-static методи; slot = `name(pjts…)` (override-ите с един и същ key заемат едно и също място в
+цялата йерархия). Vtable-ите се потяват в нов `.vtables` IR блок и се емитират в `.data` като масив
+`vtables` от `.quad vt_<cls>` + самите структури (`vt_<cls>` = `.quad <method>` за всеки slot).
+`obj.m(args)` се снижава до: нов op `vt_ref` (чете header class index, `adrp`+индекс в `vtables`),
+`lea_field`/`ld_i64` до слота и нов op `icall` (`blr` през fn-pointer; `${cargs}` — receiver param 0
+се подминава като "call-args grounded at 1"). Bare-методи в instance метод (`legend()` внаtre
+`Shape`) също минават през виртуален dispatch на `this`. Попътно: **vtables в `.data`, не
+`.rodata`** — PIE ldso прилага `R_AARCH64_RELATIVE` при load, а store в read-only сегмент
+segfault-ва динамичния линкер (даде се с gdb bt в `ldso/dynlink.c do_relocs`). Пример
+`examples/obj6.mj` (Shape/Box, `legend()` вика виртуалния `mark()`, override на `mark`/`area`,
+`(Box) s1` cast след vtable) → `18/64/8/11/-1/64`, exit 34.
 
 ## Пътна карта
 

@@ -1,0 +1,27 @@
+class Shape {
+    int legend() { return 10 + mark(); }
+    int mark() { return 1; }
+    int area() { return -1; }
+}
+
+class Box extends Shape {
+    int size;
+    Box(int s) { size = s * 2; }
+    int mark() { return size; }
+    int area() { return size * size; }
+}
+
+class T {
+    static int main() {
+        Shape s1 = new Box(4);
+        k_println_i32(s1.legend());
+        k_println_i32(s1.area());
+        k_println_i32(s1.mark());
+        Shape s2 = new Shape();
+        k_println_i32(s2.legend());
+        k_println_i32(s2.area());
+        Box b = (Box) s1;
+        k_println_i32(b.area());
+        return 34;
+    }
+}

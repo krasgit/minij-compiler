@@ -19,6 +19,7 @@ public class AstLowerMain {
     Map<String, Map<String, Object[]>> classFields = new LinkedHashMap<>(); // className → field → {irType, byteOffset, javaType}
     Map<String, List<MethSig>> classMethods = new LinkedHashMap<>(); // "cls::name" → сигнатури (overloads)
     Map<String, String> classSuper = new LinkedHashMap<>();       // className → superclassName (null за root)
+    Map<String, List<String>> classSlots = new LinkedHashMap<>(); // className → ordered vtable slot keys (super-first)
     Map<String, Java.ClassDeclaration> allDecls = new LinkedHashMap<>(); // className → декларация (за super-резолюция)
     Set<String> visiting = new HashSet<>();                       // guard за cyclic extends
     String curClass = null;                                       // текущия клас на lowering (инстанс методи); null = static/native
@@ -44,6 +45,7 @@ public class AstLowerMain {
         if (types != null) for (Object td : types) {
             if (td instanceof Java.ClassDeclaration cd) m.collectSigs(cd);
         }
+        m.buildVtables();
         if (types != null) for (Object td : types) {
             if (td instanceof Java.ClassDeclaration cd) m.emitMethods(cd);
         }
@@ -817,6 +819,82 @@ public class AstLowerMain {
         return lookupMethod(rj, mi.methodName);
     }
 
+    // ─── P3: vtable layout ─────────────────────────────────────────────────
+    // Слот = "name(pjts…)" — един и същ key в цялата йерархия държи ОДНО И СЪЩО
+    // място (override) и наследниците НЕ го местят: списъка на клас е super-first
+    // (super slots като prefix) + собствените нови методи. Изключени са static и <init>.
+    String sigKey(MethSig s) {
+        StringBuilder k = new StringBuilder(s.name).append("(");
+        for (int i = 0; i < (s.pjts == null ? 0 : s.pjts.length); i++) {
+            if (i > 0) k.append(",");
+            k.append(s.pjts[i] == null ? "_" : s.pjts[i]);
+        }
+        return k.append(")").toString();
+    }
+
+    void buildVtables() {
+        for (Map.Entry<String, Integer> e : classIndex.entrySet()) {
+            String cls = e.getKey();
+            List<String> keys = new ArrayList<>();
+            String sup = classSuper.get(cls);
+            if (sup != null) {
+                List<String> sp = classSlots.get(sup);
+                if (sp != null) keys.addAll(sp);
+            }
+            for (Map.Entry<String, List<MethSig>> en : classMethods.entrySet()) {
+                if (!en.getKey().startsWith(cls + "::") || en.getKey().startsWith(cls + "::<init>")) continue;
+                for (MethSig s : en.getValue()) {
+                    if (s.isStatic) continue;
+                    String key = sigKey(s);
+                    if (!keys.contains(key)) keys.add(key);
+                }
+            }
+            classSlots.put(cls, keys);
+        }
+        for (Map.Entry<String, Integer> e : classIndex.entrySet()) {
+            String cls = e.getKey();
+            Ir.VTable vt = new Ir.VTable();
+            vt.label = "vt_" + cls;
+            for (String key : classSlots.get(cls)) vt.syms.add(vtableSymbol(cls, key));
+            prog.vtables.add(vt);
+        }
+    }
+
+    /** Символът, който да изпълнява slot <key> за обект от клас <cls>: own override или първият в super-веригата. */
+    String vtableSymbol(String cls, String key) {
+        int lp = key.indexOf('(');
+        String name = key.substring(0, lp);
+        String c = cls;
+        while (c != null) {
+            List<MethSig> ls = classMethods.get(c + "::" + name);
+            if (ls != null) for (MethSig s : ls)
+                if (!s.isStatic && sigKey(s).equals(key)) return s.symbol;
+            c = classSuper.get(c);
+        }
+        throw new RuntimeException("vtable: no method " + key + " in " + cls + " chain");
+    }
+
+    /** Виртуално извикване: vtable на динамичния клас на recv + slot → ICALL.
+     *  Позицията на slot-а идва от списъка на статичния клас на receiver-а
+     *  (subclip-вередните vtable-и започват с него като prefix → една и съща
+     *  позиция във всички динамични класове). Връща null ако slot липсва
+     *  (fallback към директно извикване). */
+    Ir.Value virtualCall(MethSig ms, Ir.Value recv, List<Ir.Value> avs, int dbg) {
+        List<String> sp = classSlots.get(ms.cn);
+        int sl = sp == null ? -1 : sp.indexOf(sigKey(ms));
+        if (sl < 0) return null;
+        String crt = ms.retIr == null ? "i32" : ms.retIr.equals("void") ? "i32" : ms.retIr;
+        Ir.Value vt = emit("vt_ref", "ptr", recv); vt.dbg = dbg;
+        Ir.Value off = konst(sl * 8, "i64", -1);
+        Ir.Value adr = emit("lea_field", "ptr", vt, off); adr.dbg = dbg;
+        Ir.Value fn = emit("ld_i64", "ptr", adr); fn.dbg = dbg;
+        Ir.Value call = emit("icall", crt, fn);
+        call.args.add(recv);
+        call.args.addAll(avs);
+        call.dbg = dbg;
+        return call;
+    }
+
     /** Всички classIndex-и на класове, чиято super-верига включва <tc> (вкл. самия tc). */
     List<Integer> subtypeIndexes(String tc) {
         Integer ti = classIndex.get(tc);
@@ -1173,10 +1251,22 @@ if (e == null) return konst(0, "i32", -1);
                 MethSig ms = resolveSig(sigs, mi.arguments);
                 if (ms == null) throw new RuntimeException("no matching overload for " + mi.methodName + " (" + mi.arguments.length + " args)");
                 List<Ir.Value> cargs = new ArrayList<>();
-                if (!ms.isStatic) cargs.add(recvValue(mi, tgt));
-                for (int i = 0; i < mi.arguments.length; i++)
-                    if (mi.arguments[i] != null)
-                        cargs.add(conv(expr(mi.arguments[i]), ms.pirs[i] == null ? "i32" : ms.pirs[i]));
+                if (!ms.isStatic) {
+                    // virtual dispatch: vtable на динамичния клас на receiver-а
+                    Ir.Value recv = recvValue(mi, tgt);
+                    List<Ir.Value> avs = new ArrayList<>();
+                    for (int i = 0; i < mi.arguments.length; i++)
+                        if (mi.arguments[i] != null)
+                            avs.add(conv(expr(mi.arguments[i]), ms.pirs[i] == null ? "i32" : ms.pirs[i]));
+                    Ir.Value vc = virtualCall(ms, recv, avs, tag(mi));
+                    if (vc != null) return vc;
+                    cargs.add(recv);
+                    cargs.addAll(avs);
+                } else {
+                    for (int i = 0; i < mi.arguments.length; i++)
+                        if (mi.arguments[i] != null)
+                            cargs.add(conv(expr(mi.arguments[i]), ms.pirs[i] == null ? "i32" : ms.pirs[i]));
+                }
                 String crt = ms.retIr == null ? "i32" : ms.retIr.equals("void") ? "i32" : ms.retIr;
                 Ir.Value call = emit("call", crt);
                 call.name = ms.symbol;
@@ -1222,6 +1312,19 @@ if (e == null) return konst(0, "i32", -1);
             if (msiglist != null && !msiglist.isEmpty()) {
                 MethSig ms = resolveSig(msiglist, mi.arguments);
                 if (ms == null) throw new RuntimeException("no matching overload for " + mi.methodName + " (" + mi.arguments.length + " args)");
+                if (!ms.isStatic && curClass != null) {
+                    // bare instance call в instance метод → virtual на this (динамичния клас)
+                    Ir.Value al = allocaOf.get("this");
+                    if (al != null) {
+                        Ir.Value th = emit("load", al.type, al); th.dbg = -1;
+                        List<Ir.Value> avs = new ArrayList<>();
+                        for (int i = 0; i < mi.arguments.length; i++)
+                            if (mi.arguments[i] != null)
+                                avs.add(conv(expr(mi.arguments[i]), ms.pirs[i] == null ? "i32" : ms.pirs[i]));
+                        Ir.Value vc = virtualCall(ms, th, avs, tag(mi));
+                        if (vc != null) return vc;
+                    }
+                }
                 List<Ir.Value> cargs = new ArrayList<>();
                 for (int i = 0; i < mi.arguments.length; i++)
                     if (mi.arguments[i] != null)

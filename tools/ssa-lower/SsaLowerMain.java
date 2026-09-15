@@ -41,6 +41,7 @@ public class SsaLowerMain {
             else if (o.equals("const")) v.op = "CONST_" + s;
             else if (o.equals("param")) v.op = "PARAM_" + s;
             else if (o.equals("call")) v.op = "CALL_" + s;
+            else if (o.equals("icall")) v.op = "ICALL_" + s;
             else if (o.equals("copy")) v.op = "MOV_" + s;
             else if (o.equals("undef")) v.op = "CONST_" + s;
             if (o.equals("undef")) v.imm = 0;

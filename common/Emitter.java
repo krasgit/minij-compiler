@@ -6,6 +6,7 @@ public class Emitter {
     RuleParser.Rules R;
     Ir.Func fn;
     int loopIdx = -1;
+    String loopList = "";
 
     static final Set<String> SKIP = new HashSet<>(Arrays.asList(
         "store","STORE_i32","load","LOAD_i32","alloca","ALLOCA",
@@ -33,9 +34,24 @@ public class Emitter {
     }
 
     void rodata() {
-        if (poolLabels.isEmpty()) return;
-        out.append("    .section .rodata\n");
-        out.append("    .p2align 3\n");
+        if (poolLabels.isEmpty() && prog.vtables.isEmpty()) return;
+        // vtables hold relocated symbol addresses → must live in a WRITABLE
+        // segment: PIE ldso applies R_AARCH64_RELATIVE at load time; putting
+        // them in .rodata segfaults the dynamic linker (read-only store fault).
+        if (!prog.vtables.isEmpty()) {
+            out.append("    .section .data\n");
+            out.append("    .p2align 3\n");
+            for (Ir.VTable vt : prog.vtables) {
+                out.append(vt.label).append(":\n");
+                for (String s : vt.syms) out.append("    .quad ").append(s).append("\n");
+            }
+            out.append("    .p2align 3\n").append("vtables:\n");
+            for (Ir.VTable vt : prog.vtables) out.append("    .quad ").append(vt.label).append("\n");
+        }
+        if (!poolLabels.isEmpty()) {
+            out.append("    .section .rodata\n");
+            out.append("    .p2align 3\n");
+        }
         for (var e : poolLabels.entrySet()) {
             Ir.Value v = e.getKey();
             out.append(".LC" ).append(Integer.parseInt(e.getValue().substring(3)))
@@ -128,7 +144,7 @@ public class Emitter {
             throw new RuntimeException("no rule matches op '" + v.op + "' with " + v.args.size() + " args");
         Ctx cx = new Ctx();
         cx.v = v;
-        if (!sel.any) for (int i = 0; i < sel.pat.size(); i++) cx.bind.put(sel.pat.get(i), v.args.get(i));
+        for (int i = 0; i < sel.pat.size() && i < v.args.size(); i++) cx.bind.put(sel.pat.get(i), v.args.get(i));
         loopIdx = -1;
         prepareSpills(v);
         expand(sel.body, cx);
@@ -243,12 +259,13 @@ public class Emitter {
                     break;
                 }
                 case RuleParser.Stmt.FOR: {
-                    int n = s.list.equals("args")
-                        ? (cx != null ? Math.min(cx.v.args.size(), R.args.size()) : 0)
+                    int base = s.list.equals("cargs") ? 1 : 0;
+                    int n = (s.list.equals("args") || s.list.equals("cargs"))
+                        ? (cx != null ? Math.min(cx.v.args.size() - base, R.args.size()) : 0)
                         : R.args.size();
                     int save = loopIdx;
-                    for (int i = 0; i < n; i++) { loopIdx = i; expand(s.body, cx); }
-                    loopIdx = save;
+                    for (int i = 0; i < n; i++) { loopIdx = i; loopList = s.list; expand(s.body, cx); }
+                    loopIdx = save; loopList = "";
                     break;
                 }
                 case RuleParser.Stmt.IF: {
@@ -310,7 +327,7 @@ public class Emitter {
                 if (!idx) throw new RuntimeException("emit: ${ws} must be used as ${ws}[i]");
                 if (cx == null || loopIdx < 0 || loopIdx >= cx.v.args.size()) throw new RuntimeException("emit: ${ws}[i] index out of range");
                 {
-                    Ir.Value av = cx.v.args.get(loopIdx);
+                    Ir.Value av = cx.v.args.get(loopIdx + (loopList.equals("cargs") ? 1 : 0));
                     String vt = av.type;
                     boolean fp = vt != null && (vt.equals("f32") || vt.equals("f64") || vt.equals("float") || vt.equals("double"));
                     boolean i64 = vt != null && (vt.equals("i64") || vt.equals("ptr") || vt.equals("address"));
@@ -320,18 +337,23 @@ public class Emitter {
             case "params": return params();
             case "args":
                 if (!idx) throw new RuntimeException("emit: ${args} must be used as ${args}[i]");
-                if (cx == null || loopIdx < 0 || loopIdx >= cx.v.args.size()) throw new RuntimeException("emit: ${args}[i] index out of range");
-                return reg(cx.v.args.get(loopIdx));
+                if (cx == null || loopIdx < 0) throw new RuntimeException("emit: ${args}[i] index out of range");
+                return reg(cx.v.args.get(loopIdx + (loopList.equals("cargs") ? 1 : 0)));
+            case "cargs":
+                if (!idx) throw new RuntimeException("emit: ${cargs} must be used as ${cargs}[i]");
+                if (cx == null || loopIdx < 0) throw new RuntimeException("emit: ${cargs}[i] index out of range");
+                return reg(cx.v.args.get(loopIdx + 1));
             case "argregs":
                 if (!idx) throw new RuntimeException("emit: ${argregs} must be used as ${argregs}[i]");
-                if (cx == null || loopIdx < 0 || loopIdx >= cx.v.args.size()) throw new RuntimeException("emit: ${argregs}[i] index out of range");
+                if (cx == null || loopIdx < 0) throw new RuntimeException("emit: ${argregs}[i] index out of range");
                 {
+                    int base = loopList.equals("cargs") ? 1 : 0;
                     int fi = 0, ii = 0;
                     for (int k = 0; k < loopIdx; k++) {
-                        String kt = cx.v.args.get(k).type;
+                        String kt = cx.v.args.get(k + base).type;
                         if (kt != null && (kt.equals("f32") || kt.equals("f64") || kt.equals("float") || kt.equals("double"))) fi++; else ii++;
                     }
-                    String t = cx.v.args.get(loopIdx).type;
+                    String t = cx.v.args.get(loopIdx + base).type;
                     boolean fp = t != null && (t.equals("f32") || t.equals("f64") || t.equals("float") || t.equals("double"));
                     String reg = fp ? (fi < R.fargs.size() ? R.fargs.get(fi) : null)
                                     : (ii < R.args.size() ? R.args.get(ii) : null);

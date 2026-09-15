@@ -106,8 +106,8 @@
 > (`h.next.next.v` — 4 ids), после `ld_<ft>`/`st_<ft>`. Типове: `irType`/`javaTypeOf`/
 > `inferType`/`elemOf` разпознават клас-имена → `ptr`. Regalloc/Emitter непроменени освен
 > новите ops. Пример `examples/obj.mj`; регресия **19/19 (arm64)**; x86 textual emit OK.
-> Регресия сега: **23/23 (arm64)** — obj, obj2, obj3, obj4, obj5 добавени.
-> Остатък P3: **vtable dispatch (+ override/`super`-calls)**, static полета.
+> Регресия сега: **24/24 (arm64)** — obj, obj2, obj3, obj4, obj5, obj6 добавени.
+> Остатък P3: **static полета**, `super.method()` явен dispatch, `Foo[]` насочване.
 >
 > **P3 конструктори + `this` chaining (DONE, пример `examples/obj3.mj`, регресия 21/21):**
 > `new Foo(args)` → alloc_obj+st_hdr + call `Foo_init[<_irparams>]` ([obj, args…], overload
@@ -133,8 +133,19 @@
 > `instanceof`/cast използват `subtypeTest` — рефлексивно-транзитивно затваряне по super,
 > едноблокова OR-верига (`cmpeq` + `or`); несъвместим cast → null. Попътни фиксове: **AND_i32/
 > OR_i32 rules** в arm/x86 (subtype веригата + `&&`/`||`); **Emitter.saveSpills** съхранява
-> 2-арг phi-move `MOV(val, phi)` със spill-нат phi в слота на phi-то. Диспечът остава статичен
-> (vtable/override = NEXT).
+> 2-арг phi-move `MOV(val, phi)` със spill-нат phi в слота на phi-то.
+>
+> **P3 vtable dispatch + override (DONE, пример `examples/obj6.mj`, регресия 24/24):**
+> `buildVtables` строи per-клас slot-списък (super-списъкът като prefix + собствените не-static
+> методи; slot key = `name(pjts…)`, override-и с един key → една позиция в цялата йерархия);
+> позицията на слота се търси в `classSlots[ms.cn]` (стабилна за всички потомци; независими
+> йерархии с еднакви sigKey не си пречат). Нов `icall` op = `vt_ref` (header class index →
+> `adrp/add` в масива `vtables`, `ldr` vtable ptr) + `lea_field`/`ld_i64` до слота + `blr fn`
+> (`${cargs}` — args започват от 1, receiver-ът е arg 0). Нов `.vtables` IR блок (Writer/Reader).
+> Попътни фиксове: **(1) vtables в `.data`, не `.rodata`** — PIE ldso прилага `R_AARCH64_RELATIVE`
+> при load, store в RO сегмент = segfault в `ldso/dynlink.c do_relocs`; **(2)** Emitter `${cargs}`
+> loop-лист + RuleParser `args...` (pattern име + any); **(3)** bind-цикълът клипва при
+> `i < args.size()` (без out-of-bounds за `pat` по-дълъг от args).
 >
 > **P3 методи + overloads (DONE, пример `examples/obj2.mj`, регресия 20/20):** instance-методи
 > `obj.m(args)` + static `Cls.m(args)` диспеч без vtable. `cls()` гради `MethSig` DB в
