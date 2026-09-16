@@ -23,8 +23,7 @@
     <minij.expected>7</minij.expected>
     <!-- поддържан таргет; x86-64 управлява се от pom property-тата долу.
          Всичко се делегира на projects/build.sh (виж "Смяна на таргета" там). -->
-    <minij.target>arm64</minij.target>
-    <minij.qemu>qemu-aarch64 -L /usr/aarch64-linux-gnu</minij.qemu>
+    <minij.target>x86-64</minij.target>
     <minij.repo>${project.basedir}/..</minij.repo>
   </properties>
 
@@ -55,7 +54,7 @@
               </arguments>
             </configuration>
           </execution>
-          <!-- 2) изпълнение под qemu + проверка на exit кода -->
+          <!-- 2) изпълнение (нативно ако arch съвпада, иначе през qemu) + проверка на exit кода -->
           <execution>
             <id>run-app</id>
             <phase>verify</phase>
@@ -64,12 +63,10 @@
               <workingDirectory>${project.basedir}</workingDirectory>
               <executable>bash</executable>
               <arguments>
-                <argument>-c</argument>
-                <argument>
-                  ${minij.qemu} ${project.build.directory}/app; got=$$?;
-                  echo "  App.mj exit=$$got (очаквано ${minij.expected})";
-                  [ "$$got" = "${minij.expected}" ]
-                </argument>
+                <argument>${project.basedir}/run.sh</argument>
+                <argument>${minij.target}</argument>
+                <argument>${project.build.directory}/app</argument>
+                <argument>${minij.expected}</argument>
               </arguments>
             </configuration>
           </execution>

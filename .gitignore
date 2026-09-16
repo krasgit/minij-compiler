@@ -3,6 +3,15 @@ lib/*.jar
 t_*
 *.o
 *.class
+/-.alloc.mir
+/-.final.mir
+/a64_hello
+/-.ast
+/-.mir
+/-.lir
+/projects/App.mir
+/projects/*.ssa
+/*.ssa
 /gcd.alloc.mir
 /-.alloc.mir
 
@@ -26,11 +35,12 @@ t_*
 
 # Maven build (git третира target/ като output, не като източник)
 projects/target/
-projects/App.ast
-projects/App.final.mir
-projects/App.lir
-projects/App.mir
-projects/App.opt.ssa
-projects/App.ssa
-projects/App.alloc.mir
+projects/*.ast
+projects/*.final.mir
+projects/*.lir
+projects/*.mir
+projects/*.opt.ssa
+projects/*.ssa
+projects/*.alloc.mir
 *.buff
+/.idea/

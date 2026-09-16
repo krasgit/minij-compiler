@@ -85,3 +85,4 @@ mvn -Dminij.expected=7 verify    # ако промените main(), обнов�
 
 
 mvn verify -Dminij.target=x86-64 -Dminij.qemu=
+mvn verify -Dminij.target=arm64 -Dminij.qemu="qemu-aarch64 -L /usr/aarch64-linux-gnu"

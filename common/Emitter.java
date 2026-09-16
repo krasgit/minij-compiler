@@ -220,7 +220,7 @@ public class Emitter {
         String t = spillTemp.get(v);
         String mem = slotMem(v);
         if (arch.equals("arm64")) out.append("    str ").append(t).append(", ").append(mem).append("\n");
-        else out.append(t.equals("%r11") ? "    movq " : "    movl ").append(mem).append(", ").append(t).append("\n");
+        else out.append(t.equals("%r11") ? "    movq " : "    movl ").append(t).append(", ").append(mem).append("\n");
     }
 
     void prepareSpills(Ir.Value v) {

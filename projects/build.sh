@@ -17,7 +17,8 @@ done
 export PATH="$JAVA_HOME/bin:$PATH"
 
 # ── 1) сглобяване на тулчейна (еднократно; idempotентен) ──
-[ -x "$REPO/mc" ] || ( cd "$REPO" && bash ./build.sh >/dev/null )
+#[ -x "$REPO/mc" ] || ( cd "$REPO" && bash ./build.sh >/dev/null )
+( cd "$REPO" && bash ./build.sh >/dev/null )
 
 # ── 2) компилиране на App.mj → нативен (CWD=REPO → rules/ се resolve-ва) ──
 OUTDIR="$(dirname "$OUT")"; [ -n "$OUTDIR" ] && mkdir -p "$OUTDIR"
