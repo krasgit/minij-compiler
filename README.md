@@ -93,7 +93,7 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **28/28 теста на arm64**
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **29/29 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
@@ -107,7 +107,9 @@ obj6 `18/64/8/11/-1/64`, exit 34 (P3 vtable dispatch/override),
 obj7 `2/2/3/4/100/100/107/2/2`, exit 42 (P3 static полета),
 obj8 `3/8/10/6/96/996/11/102/15/15`, exit 42 (P3 super.method/field),
 obj9 `28/11/1/15/25/5/5/4`, exit 42 (P3 масив от обекти),
-obj10 `1/2/3/1/2/42`, exit 0 (P3 void методи + `static void main`); всеки — exit code + stdout чек).
+obj10 `1/2/3/1/2/42`, exit 0 (P3 void методи + `static void main`);
+cflow `30/2/23/23/22/40/24/33/8/103/3`, exit 0 (P4 control flow — short-circuit, compound, `++/--`,
+labeled loops, enhanced-for, assignment-as-expression); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -277,12 +279,49 @@ Reader-ът (ир. `retType.equals("void")`) го четеше като `RETURN_
 (инстантни `void reset()/add1()`, статичен `void printAll()`, изрични `return;`, инт-методи наред,
 `static void main`) → `1/2/3/1/2/42`, exit 0.
 
+### Контрол (P4) — short-circuit, compound, `++/--`, labeled цикли, enhanced-for
+
+Java-семантиката на изразите и циклите вече е правилна:
+
+- **Short-circuit `&&` / `||`**: преди слизаха eager до `and`/`or` (RHS на `&&`/`||` се оценяваше
+  винаги). Сега `&&` → блок „lhs==0 → store 0", иначе eval RHS → `cmpne(rv,0)`; `||` аналогично с
+  1. В `expr()`: `BinaryOperation(&&/||)` → `scAndOr(b, isAnd)` (alloca tmp + `sc_<id>_e/_o/_j`
+  блокове). `and`/`or` правилата остават — не са dead, subtype OR-веригата ги ползва.
+- **Compound присвоявания** `+= -= *= /= %=`: преди `handleAssign` игнорираше operator-а и тихо
+  правеше `=`. Сега `assignVal`/`tgtFor`/`readTgt`/`writeTgt`: `Tgt{ptr, t, isAlloca}` — array elem
+  (`chk+lea_<el>`, st/ld_`<el>`), AmbigName полета/`this`, локали (alloca → `load`/`store`),
+  `FieldAccessExpression`/super. Compound = `wide()` → `mapOp(чист binop)` → `conv` обратно → write,
+  като израз връща финалната стойност.
+- **`++` / `--`** (pre/postfix, `Java.Crement` — беше `# unsupported expr` → konst 0): `crementVal` —
+  `readTgt` + `add`/`sub` 1 + `writeTgt`; pre връща новата, post старата стойност; работи и на
+  локали, и на масивни елементи (`a[i]++`, `a[i++]++`).
+- **Assignment-as-expression**: `Java.Assignment` в `expr()` → `assignVal` (преди konst 0 и без
+  write). Работи `(x = expr)`, в ternary branch-ове и като функция-арг `f(a = f(b))`.
+- **Labeled break/continue**: `Java.LabeledStatement` → `labelBreak`/`labelCont` карти (label → блок);
+  `break lbl`/`continue lbl` резолват от тях; non-loop labeled тяло (`label: { … }`) получава
+  `lblb_<id>` exit блок. Unlabeled и labeled се комбинират (break inner без label ходи в най-близкия).
+- **Enhanced-for `for (T x : arr)`**: `forEachStmt` — alloca counter `_ec<id>`, блокове
+  `feh_/feb_/fest_/fex_`, `len`+`cmplt`, `chk`+`lea_<el>`+`ld_<el>` → store в елементния слот;
+  continue → step, break → exit. Елементният слот се инициализира с `const 0` преди цикъла — иначе
+  SSA phi-ът на entry-edge стойността няма localocation и fallback-ва в w-reg → `mov x28, w9`
+  (operand mismatch). Работи над int[]/други, `String` (char[] елементи), `Foo[]` и `int[][]` (2D).
+  `for (;;)` без update/condition също е ок (null update guard).
+- **Bugfix (латентен)**: bare-name MethodInvocation оценяваше аргументите **два пъти** (веднъж в
+  общ `args` списък преди resolve-а и пак в call-args) — `f(bump())` викаше два пъти и `f(a=f(b))`
+  даваше погрешно. Сега аргументите се оценяват веднъж, **преди** `emit("call")` (иначе call-ът стои
+  в IR преди arg-инструкциите → scratch-регистри garbage). obj10/print/str (k_println_* със
+  side-effect аргументи) го доказват.
+
+Пример `examples/cflow.mj` (short-circuit със side-effect `bump()`, `+=`/`*=`/`-=`, pre/post `++`
+и `--`, labeled `break outer`/`continue`, enhanced-for над `int[]` и `Card[]`, assignment-as-arg,
+compound на масив елемент) → `30/2/23/23/22/40/24/33/8/103/3`, exit 0.
+
 ## Пътна карта
 
 Пълен план P0–P8: [docs/ROADMAP.md](docs/ROADMAP.md).
 Core lib договор (API-огледало на java.base): [docs/corelib.md](docs/corelib.md).
 
-Кратко: P0 (инфраструктура/`.rule v2`) → P1 (типове) → P2 (памет/масиви/String) → P3 (обекти/header) → P3.5 (GC) → P4 (контрол) → P5 (exceptions) → P6 (core lib) → P7 (threads/concurrency) → P8 (модерен Java).
+Кратко: P0 (инфраструктура/`.rule v2`) → P1 (типове) → P2 (памет/масиви/String) → P3 (обекти/header) → P3.5 (GC) → ~~P4 (контрол — done)~~ → P5 (exceptions) → P6 (core lib) → P7 (threads/concurrency) → P8 (модерен Java).
 
 ## Структура
 

@@ -26,6 +26,7 @@ public class AstLowerMain {
     Set<String> visiting = new HashSet<>();                       // guard за cyclic extends
     String curClass = null;                                       // текущия клас на lowering (инстанс методи); null = static/native
     Deque<Ir.Block> breaks = new ArrayDeque<>(), conts = new ArrayDeque<>();
+    Map<String, Ir.Block> labelBreak = new HashMap<>(), labelCont = new HashMap<>();
     int dbgSeq = 1;
 
     public static void main(String[] args) throws Exception {
@@ -459,6 +460,7 @@ public class AstLowerMain {
         f.name = sig != null ? sig.symbol : m.name;
         f.retType = sig != null ? sig.retIr : irType(getStr(m, "type"));
         curFunc = f; allocaOf.clear(); varType.clear(); varJType.clear(); breaks.clear(); conts.clear();
+        labelBreak.clear(); labelCont.clear();
         curClass = sig != null ? sig.cn : null;
         if (sig != null && !sig.isStatic) {
             varJType.put("this", sig.cn);
@@ -580,54 +582,28 @@ public class AstLowerMain {
             if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(j));
             curFunc.blocks.add(j); cur = j;
         } else if (s instanceof Java.WhileStatement w) {
-            int id = dbgSeq++;
-            Ir.Block h = new Ir.Block("head_"+id), b = new Ir.Block("body_"+id), x = new Ir.Block("exit_"+id);
-            emit("jump","void",blockRef(h));
-            curFunc.blocks.add(h); cur = h;
-            Ir.Value c = expr(w.condition);
-            emit("branch","void",c,blockRef(b),blockRef(x));
-            breaks.push(x); conts.push(h);
-            curFunc.blocks.add(b); cur = b; stmt(w.body);
-            if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(h));
-            breaks.pop(); conts.pop();
-            curFunc.blocks.add(x); cur = x;
+            doWhileStmt(null, w);
         } else if (s instanceof Java.DoStatement dw) {
-            int id = dbgSeq++;
-            Ir.Block b = new Ir.Block("body_"+id), h = new Ir.Block("head_"+id), x = new Ir.Block("exit_"+id);
-            emit("jump","void",blockRef(b));   // body runs at least once
-            breaks.push(x); conts.push(h);
-            curFunc.blocks.add(b); cur = b;
-            stmt((Java.BlockStatement) get(dw, "body"));
-            if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(h));
-            curFunc.blocks.add(h); cur = h;
-            Ir.Value c = expr(dw.condition);
-            emit("branch","void",c,blockRef(b),blockRef(x));
-            breaks.pop(); conts.pop();
-            curFunc.blocks.add(x); cur = x;
+            doStmt(null, dw);
         } else if (s instanceof Java.ForStatement f) {
-            if (f.init != null) stmt(f.init);
-            int id = dbgSeq++;
-            Ir.Block h = new Ir.Block("head_"+id), b = new Ir.Block("body_"+id), st = new Ir.Block("step_"+id), x = new Ir.Block("exit_"+id);
-            emit("jump","void",blockRef(h));
-            curFunc.blocks.add(h); cur = h;
-            Object cond = f.condition;
-            if (cond instanceof Java.Rvalue rv) {
-                Ir.Value c = expr(rv);
-                emit("branch","void",c,blockRef(b),blockRef(x));
-            } else emit("jump","void",blockRef(b));
-            breaks.push(x); conts.push(st);
-            curFunc.blocks.add(b); cur = b;
-            Object body = f.body;
-            if (body instanceof Java.BlockStatement bs) stmt(bs);
-            if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(st));
-            curFunc.blocks.add(st); cur = st;
-            for (Java.Rvalue u : f.update) if (u != null) {
-                if (u instanceof Java.Assignment as) handleAssign(as);
-                else expr(u);
+            forStmt(null, f);
+        } else if (s instanceof Java.ForEachStatement fe) {
+            forEachStmt(fe);
+        } else if (s instanceof Java.LabeledStatement lb) {
+            String lbl = String.valueOf(get(lb, "label"));
+            Object body = get(lb, "body");
+            if (body instanceof Java.WhileStatement    wb) doWhileStmt(lbl, wb);
+            else if (body instanceof Java.DoStatement db) doStmt(lbl, db);
+            else if (body instanceof Java.ForStatement fb) forStmt(lbl, fb);
+            else {
+                int lid = dbgSeq++;
+                Ir.Block lbx = new Ir.Block("lblb_" + lid);
+                Ir.Block oBr = labelBreak.put(lbl, lbx);
+                if (body instanceof Java.BlockStatement bs) stmt(bs);
+                if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(lbx));
+                if (oBr == null) labelBreak.remove(lbl); else labelBreak.put(lbl, oBr);
+                curFunc.blocks.add(lbx); cur = lbx;
             }
-            if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(h));
-            breaks.pop(); conts.pop();
-            curFunc.blocks.add(x); cur = x;
         } else if (s instanceof Java.SwitchStatement sw) {
             int id = dbgSeq++;
             Ir.Block exit = new Ir.Block("swx_"+id);
@@ -686,72 +662,252 @@ public class AstLowerMain {
             } else emit("return","void");
         } else if (s instanceof Java.Block b) {
             if (b.statements != null) for (Java.BlockStatement x : b.statements) stmt(x);
-        } else if (s instanceof Java.BreakStatement) {
-            if (!breaks.isEmpty()) emit("jump","void",blockRef(breaks.peek()));
-        } else if (s instanceof Java.ContinueStatement) {
-            if (!conts.isEmpty()) emit("jump","void",blockRef(conts.peek()));
+        } else if (s instanceof Java.BreakStatement bst) {
+            Object lbl = get(bst, "label");
+            if (lbl != null) {
+                Ir.Block t = labelBreak.get(String.valueOf(lbl));
+                if (t == null) { System.err.println("# break label not in scope: " + lbl); t = breaks.isEmpty() ? null : breaks.peek(); }
+                if (t != null) emit("jump","void",blockRef(t));
+            } else if (!breaks.isEmpty()) emit("jump","void",blockRef(breaks.peek()));
+        } else if (s instanceof Java.ContinueStatement cst) {
+            Object lbl = get(cst, "label");
+            if (lbl != null) {
+                Ir.Block t = labelCont.get(String.valueOf(lbl));
+                if (t == null) { System.err.println("# continue label not in scope: " + lbl); t = conts.isEmpty() ? null : conts.peek(); }
+                if (t != null) emit("jump","void",blockRef(t));
+            } else if (!conts.isEmpty()) emit("jump","void",blockRef(conts.peek()));
         } else if (s instanceof Java.EmptyStatement) {
         } else System.err.println("# unsupported stmt: " + s.getClass().getSimpleName());
     }
 
-    void handleAssign(Java.Assignment a) {
-        if (a.lhs instanceof Java.ArrayAccessExpression aa) {
+    void doWhileStmt(String lbl, Java.WhileStatement w) {
+        int id = dbgSeq++;
+        Ir.Block h = new Ir.Block("head_"+id), b = new Ir.Block("body_"+id), x = new Ir.Block("exit_"+id);
+        emit("jump","void",blockRef(h));
+        curFunc.blocks.add(h); cur = h;
+        Ir.Value c = expr(w.condition);
+        emit("branch","void",c,blockRef(b),blockRef(x));
+        Ir.Block oBr = lbl == null ? null : labelBreak.put(lbl, x);
+        Ir.Block oCt = lbl == null ? null : labelCont.put(lbl, h);
+        breaks.push(x); conts.push(h);
+        curFunc.blocks.add(b); cur = b; stmt(w.body);
+        if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(h));
+        breaks.pop(); conts.pop();
+        if (lbl != null) { if (oBr == null) labelBreak.remove(lbl); else labelBreak.put(lbl, oBr);
+                           if (oCt == null) labelCont.remove(lbl); else labelCont.put(lbl, oCt); }
+        curFunc.blocks.add(x); cur = x;
+    }
+
+    void doStmt(String lbl, Java.DoStatement dw) {
+        int id = dbgSeq++;
+        Ir.Block b = new Ir.Block("body_"+id), h = new Ir.Block("head_"+id), x = new Ir.Block("exit_"+id);
+        emit("jump","void",blockRef(b));   // body runs at least once
+        Ir.Block oBr = lbl == null ? null : labelBreak.put(lbl, x);
+        Ir.Block oCt = lbl == null ? null : labelCont.put(lbl, h);
+        breaks.push(x); conts.push(h);
+        curFunc.blocks.add(b); cur = b;
+        stmt((Java.BlockStatement) get(dw, "body"));
+        if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(h));
+        curFunc.blocks.add(h); cur = h;
+        Ir.Value c = expr(dw.condition);
+        emit("branch","void",c,blockRef(b),blockRef(x));
+        breaks.pop(); conts.pop();
+        if (lbl != null) { if (oBr == null) labelBreak.remove(lbl); else labelBreak.put(lbl, oBr);
+                           if (oCt == null) labelCont.remove(lbl); else labelCont.put(lbl, oCt); }
+        curFunc.blocks.add(x); cur = x;
+    }
+
+    void forStmt(String lbl, Java.ForStatement f) {
+        if (f.init != null) stmt(f.init);
+        int id = dbgSeq++;
+        Ir.Block h = new Ir.Block("head_"+id), b = new Ir.Block("body_"+id), st = new Ir.Block("step_"+id), x = new Ir.Block("exit_"+id);
+        emit("jump","void",blockRef(h));
+        curFunc.blocks.add(h); cur = h;
+        Object cond = f.condition;
+        if (cond instanceof Java.Rvalue rv) {
+            Ir.Value c = expr(rv);
+            emit("branch","void",c,blockRef(b),blockRef(x));
+        } else emit("jump","void",blockRef(b));
+        Ir.Block oBr = lbl == null ? null : labelBreak.put(lbl, x);
+        Ir.Block oCt = lbl == null ? null : labelCont.put(lbl, st);
+        breaks.push(x); conts.push(st);
+        curFunc.blocks.add(b); cur = b;
+        Object body = f.body;
+        if (body instanceof Java.BlockStatement bs) stmt(bs);
+        if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(st));
+        curFunc.blocks.add(st); cur = st;
+        for (Java.Rvalue u : f.update == null ? new Java.Rvalue[0] : f.update) if (u != null) {
+            if (u instanceof Java.Assignment as) handleAssign(as);
+            else expr(u);
+        }
+        if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(h));
+        breaks.pop(); conts.pop();
+        if (lbl != null) { if (oBr == null) labelBreak.remove(lbl); else labelBreak.put(lbl, oBr);
+                           if (oCt == null) labelCont.remove(lbl); else labelCont.put(lbl, oCt); }
+        curFunc.blocks.add(x); cur = x;
+    }
+
+    /** enhanced-for: `for (T x : arr) body` → брояч + head/load + chk/lea/ld + step. */
+    void forEachStmt(Java.ForEachStatement fe) {
+        int id = dbgSeq++;
+        Object fpo = get(fe, "currentElement");
+        String elName = fpo == null ? null : getStr(fpo, "name");
+        String elJt = fpo == null ? null : getStr(fpo, "type");
+        Object expO = get(fe, "expression");
+        Ir.Value arr = expO instanceof Java.Rvalue rv ? expr(rv) : konst(0, "ptr", -1);
+        String cjt = javaTypeOf((Java.Rvalue) expO);
+        String elIr = elemOfAccess(cjt);
+        if (elIr == null) throw new RuntimeException("for-each over unsupported type: " + cjt);
+        Ir.Value len = emit("len", "i32", arr); len.dbg = tag(fe);
+        String ci = "_ec" + id;
+        Ir.Value al = emit("alloca", "i32"); al.dbg = id;
+        allocaOf.put(ci, al); varType.put(ci, "i32");
+        Ir.Value z0 = emit("store", "void", al, konst(0, "i32", -1)); z0.dbg = id;
+        Ir.Value xe = emit("alloca", elIr); xe.dbg = id;
+        allocaOf.put(elName, xe); varType.put(elName, elIr); varJType.put(elName, elJt);
+        Ir.Value zx = emit("store", "void", xe, konst(0, elIr, -1)); zx.dbg = id;
+        Ir.Block h = new Ir.Block("feh_" + id), b = new Ir.Block("feb_" + id), st = new Ir.Block("fest_" + id), x = new Ir.Block("fex_" + id);
+        emit("jump", "void", blockRef(h));
+        curFunc.blocks.add(h); cur = h;
+        Ir.Value i0 = emit("load", "i32", al);
+        Ir.Value lt = emit("cmplt", "i32", i0, len); lt.dbg = tag(fe);
+        emit("branch", "void", lt, blockRef(b), blockRef(x));
+        breaks.push(x); conts.push(st);
+        curFunc.blocks.add(b); cur = b;
+        Ir.Value i1 = emit("load", "i32", al);
+        Ir.Value ck = emit("chk", "void", arr, i1); ck.dbg = tag(fe);
+        Ir.Value ad = emit("lea_" + elIr, "ptr", arr, i1); ad.dbg = tag(fe);
+        Ir.Value ev = emit("ld_" + elIr, elIr, ad); ev.dbg = tag(fe);
+        Ir.Value xeSt = emit("store", "void", xe, conv(ev, elIr)); xeSt.dbg = tag(fe);
+        Object body = get(fe, "body");
+        if (body instanceof Java.BlockStatement bs) stmt(bs);
+        if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump", "void", blockRef(st));
+        curFunc.blocks.add(st); cur = st;
+        Ir.Value i2 = emit("load", "i32", al);
+        Ir.Value plus = emit("add", "i32", i2, konst(1, "i32", -1)); plus.dbg = tag(fe);
+        Ir.Value z1 = emit("store", "void", al, plus); z1.dbg = tag(fe);
+        if (cur.term()==null||!Ir.isTerm(cur.term().op)) emit("jump", "void", blockRef(h));
+        breaks.pop(); conts.pop();
+        curFunc.blocks.add(x); cur = x;
+    }
+
+    void handleAssign(Java.Assignment a) { assignVal(a); }
+
+    /** Целеви „слот" на lvalue: ptr стойност (адрес), IR тип и дали е alloca-промавен. */
+    record Tgt(Ir.Value ptr, String t, boolean isAlloca) {}
+
+    Tgt tgtFor(Java.Rvalue lhs) {
+        if (lhs instanceof Java.ArrayAccessExpression aa) {
             Ir.Value b = expr(aa.lhs);
             Ir.Value i = conv(expr(aa.index), "i32");
             String el = elemOfAccess(javaTypeOf(aa.lhs));
             if (el == null) throw new RuntimeException("array element type unknown at assign");
-            Ir.Value ck = emit("chk", "void", b, i); ck.dbg = tag(a);
-            Ir.Value ad = emit("lea_" + el, "ptr", b, i); ad.dbg = tag(a);
-            Ir.Value v = conv(expr(a.rhs), el);
-            Ir.Value st = emit("st_" + el, "void", ad, v); st.dbg = tag(a);
-            return;
+            Ir.Value ck = emit("chk", "void", b, i); ck.dbg = tag(aa);
+            Ir.Value ad = emit("lea_" + el, "ptr", b, i); ad.dbg = tag(aa);
+            return new Tgt(ad, el, false);
         }
-        if (a.lhs instanceof Java.AmbiguousName fa && fa.identifiers.length > 1) {
+        if (lhs instanceof Java.AmbiguousName fa && fa.identifiers.length > 1) {
             if (fa.identifiers[1].equals("length"))
                 throw new RuntimeException("cannot assign to .length");
             FieldAddr f = fieldAddr(fa);
             if (f == null) throw new RuntimeException("cannot assign field target: " + fa.identifiers[0]);
-            Ir.Value v = conv(expr(a.rhs), f.ir);
-            Ir.Value st = emit("st_" + f.ir, "void", f.addr, v); st.dbg = tag(a);
-            return;
+            return new Tgt(f.addr, f.ir, false);
         }
         String name = null;
-        if (a.lhs instanceof Java.AmbiguousName an) name = an.identifiers[0];
-        if (name == null) {
-            if (isSuperNode(a.lhs, "SuperclassFieldAccessExpression")) {
-                FieldAddr f = superFieldAddr(getStr(a.lhs, "fieldName"));
-                if (f != null) {
-                    Ir.Value v = conv(expr(a.rhs), f.ir);
-                    Ir.Value st = emit("st_" + f.ir, "void", f.addr, v); st.dbg = tag(a);
-                    return;
-                }
-            }
-            if (a.lhs instanceof Java.FieldAccessExpression fe) {
-                String nm = getStr(fe, "fieldName");
-                Object lh = get(fe, "lhs");
-                if (lh instanceof Java.Rvalue lv) {
-                    FieldAddr f = fieldAddrFrom(lv, nm);
-                    if (f != null) {
-                        Ir.Value v = conv(expr(a.rhs), f.ir);
-                        Ir.Value st = emit("st_" + f.ir, "void", f.addr, v); st.dbg = tag(a);
-                        return;
-                    }
-                }
-            }
-            System.err.println("# assign target unsupported"); return;
-        }
-        Ir.Value al = allocaOf.get(name);
-        if (al == null) {
+        if (lhs instanceof Java.AmbiguousName an) name = an.identifiers[0];
+        if (name != null) {
+            Ir.Value al = allocaOf.get(name);
+            if (al != null) return new Tgt(al, varType.getOrDefault(name, al.type), true);
             FieldAddr ft = fieldThis(name);
-            if (ft != null) {
-                Ir.Value v = conv(expr(a.rhs), ft.ir);
-                Ir.Value st = emit("st_" + ft.ir, "void", ft.addr, v); st.dbg = tag(a);
-                return;
-            }
-            System.err.println("# undefined: " + name); return;
+            if (ft != null) return new Tgt(ft.addr, ft.ir, false);
+            System.err.println("# undefined: " + name);
+            return new Tgt(konst(0, "ptr", -1), "i32", false);
         }
-        Ir.Value v = conv(expr(a.rhs), varType.getOrDefault(name, al.type));
-        Ir.Value st = emit("store","void",al,v); st.dbg = tag(a);
+        if (isSuperNode(lhs, "SuperclassFieldAccessExpression")) {
+            FieldAddr f = superFieldAddr(getStr(lhs, "fieldName"));
+            if (f == null) throw new RuntimeException("super assign on non-field");
+            return new Tgt(f.addr, f.ir, false);
+        }
+        if (lhs instanceof Java.FieldAccessExpression fe) {
+            String nm = getStr(fe, "fieldName");
+            Object lh = get(fe, "lhs");
+            if (lh instanceof Java.Rvalue lv) {
+                FieldAddr f = fieldAddrFrom(lv, nm);
+                if (f != null) return new Tgt(f.addr, f.ir, false);
+            }
+        }
+        System.err.println("# assign target unsupported"); return new Tgt(konst(0, "ptr", -1), "i32", false);
+    }
+
+    Ir.Value readTgt(Tgt t, int d) {
+        Ir.Value v = t.isAlloca ? emit("load", t.t, t.ptr) : emit("ld_" + t.t, t.t, t.ptr);
+        v.dbg = d; return v;
+    }
+    void writeTgt(Tgt t, Ir.Value x, int d) {
+        Ir.Value st = t.isAlloca ? emit("store", "void", t.ptr, x) : emit("st_" + t.t, "void", t.ptr, x);
+        st.dbg = d;
+    }
+
+    Ir.Value assignVal(Java.Assignment a) {
+        Tgt t = tgtFor(a.lhs);
+        String op = getStr(a, "operator");
+        if (op == null || op.equals("=")) {
+            Ir.Value v = conv(expr(a.rhs), t.t);
+            writeTgt(t, v, tag(a));
+            return v;
+        }
+        String bin;
+        switch (op) {
+            case "+=": bin = "+"; break; case "-=": bin = "-"; break;
+            case "*=": bin = "*"; break; case "/=": bin = "/"; break; case "%=": bin = "%"; break;
+            default: throw new RuntimeException("unsupported compound operator: " + op);
+        }
+        Ir.Value old = readTgt(t, tag(a));
+        Ir.Value rv = expr(a.rhs);
+        String w = wide(t.t, rv.type);
+        Ir.Value ow = w.equals(t.t) ? old : conv(old, w);
+        Ir.Value rw = w.equals(rv.type) ? rv : conv(rv, w);
+        Ir.Value res = emit(mapOp(bin), w, ow, rw); res.dbg = tag(a);
+        Ir.Value fin = w.equals(t.t) ? res : conv(res, t.t);
+        fin.dbg = tag(a);
+        writeTgt(t, fin, tag(a));
+        return fin;
+    }
+
+    /** `++`/`--` (prefix/postfix) като израз → новата стойност (pre) или старата (post). */
+    Ir.Value crementVal(Java.Crement c) {
+        boolean pre = Boolean.TRUE.equals(get(c, "pre"));
+        String op = getStr(c, "operator");
+        Tgt t = tgtFor((Java.Rvalue) get(c, "operand"));
+        Ir.Value old = readTgt(t, tag(c));
+        Ir.Value one = konst(1, t.t, tag(c));
+        Ir.Value nw = emit(op.equals("++") ? "add" : "sub", t.t, old, one); nw.dbg = tag(c);
+        writeTgt(t, nw, tag(c));
+        return pre ? nw : old;
+    }
+
+    /** Short-circuit `&&`/`||`: RHS се оценява само ако LHS не решава резултата.
+     *  Връща 1/0 (i32) като `and`/`or` преди — но с Java семантика на изпълнение. */
+    Ir.Value scAndOr(Java.BinaryOperation b, boolean isAnd) {
+        Ir.Value c = expr(b.lhs);
+        int id = dbgSeq++;
+        Ir.Block e2 = new Ir.Block("sc_" + id + "_e"), o = new Ir.Block("sc_" + id + "_o"), j = new Ir.Block("sc_" + id + "_j");
+        Ir.Value tmp = emit("alloca", "i32"); tmp.dbg = tag(b);
+        Ir.Value k0 = konst(0, c.type, tag(b));
+        Ir.Value test = isAnd ? emit("cmpeq", "i32", c, k0) : emit("cmpne", "i32", c, k0);
+        test.dbg = tag(b);
+        emit("branch", "void", test, blockRef(o), blockRef(e2));
+        curFunc.blocks.add(e2); cur = e2;
+        Ir.Value rv = expr(b.rhs);
+        Ir.Value rr = emit("cmpne", "i32", rv, konst(0, rv.type, tag(b))); rr.dbg = tag(b);
+        Ir.Value st1 = emit("store", "void", tmp, rr); st1.dbg = tag(b);
+        emit("jump", "void", blockRef(j));
+        curFunc.blocks.add(o); cur = o;
+        Ir.Value st2 = emit("store", "void", tmp, konst(isAnd ? 0 : 1, "i32", tag(b))); st2.dbg = tag(b);
+        emit("jump", "void", blockRef(j));
+        curFunc.blocks.add(j); cur = j;
+        Ir.Value res = emit("load", "i32", tmp); res.dbg = tag(b);
+        return res;
     }
 
     /** `new T[m][n]` → външен ptr-масив (редовете са масиви от елементи) + цикъл, който
@@ -1127,6 +1283,8 @@ public class AstLowerMain {
     Ir.Value expr(Java.Rvalue e) {
 if (e == null) return konst(0, "i32", -1);
         if (e instanceof Java.ParenthesizedExpression pe) return expr(pe.value);
+        if (e instanceof Java.Assignment asgn) return assignVal(asgn);
+        if (e instanceof Java.Crement cre) return crementVal(cre);
         if (e instanceof Java.ThisReference tr) {
             Ir.Value al = allocaOf.get("this");
             if (al == null) throw new RuntimeException("this used outside instance method");
@@ -1268,6 +1426,7 @@ if (e == null) return konst(0, "i32", -1);
             throw new RuntimeException("field access on non-array (fields unsupported): " + nm);
         }
         if (e instanceof Java.BinaryOperation b) {
+            if (b.operator.equals("&&") || b.operator.equals("||")) return scAndOr(b, b.operator.equals("&&"));
             Ir.Value l = expr(b.lhs), r = expr(b.rhs);
             String w = wide(l.type, r.type);
             if (!w.equals("i32")) { l = conv(l, w); r = conv(r, w); }
@@ -1409,9 +1568,9 @@ if (e == null) return konst(0, "i32", -1);
                 String[] ids = idsO == null ? null : Arrays.stream(idsO).map(String::valueOf).toArray(String[]::new);
                 sysout = ids != null && ids.length >= 2 && ids[0].equals("System") && ids[1].equals("out");
             }
-            List<Ir.Value> args = new ArrayList<>();
-            for (Java.Rvalue a : mi.arguments) if (a != null) args.add(expr(a));
-            if (sysout) {
+                        if (sysout) {
+                List<Ir.Value> args = new ArrayList<>();
+                for (Java.Rvalue a : mi.arguments) if (a != null) args.add(expr(a));
                 String nm;
                 if (mi.methodName.equals("println") && mi.arguments.length == 0) nm = "k_newline";
                 else if (mi.methodName.equals("println"))
@@ -1465,6 +1624,8 @@ if (e == null) return konst(0, "i32", -1);
                 call.dbg = tag(mi);
                 return call;
             }
+            List<Ir.Value> args = new ArrayList<>();
+            for (Java.Rvalue a : mi.arguments) if (a != null) args.add(expr(a));
             Ir.Value call = emit("call", rt);
             call.name = nativeMangle.getOrDefault(mi.methodName, mi.methodName);
             call.args.addAll(args);

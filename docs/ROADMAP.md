@@ -210,9 +210,13 @@
 - **B)** MMTk binding (Rust, `VMBinding` FFI).
 - Seam-ът от P0/P2/P3 (header, trace-tables, GC maps, `mm_alloc`) е готов.
 
-## P4 — Контрол
-- `tableswitch`/`lookupswitch`, enhanced-for, break/continue с label.
-- Switch-изрази, ternary в повече позиции.
+## P4 — Контрол ✅ (done, cflow; 29/29)
+- ✅ `tableswitch`/`lookupswitch` (switch.mj съществува от P0), enhanced-for (`forEachStmt` — чек,
+  обекти/2D burn-tested), break/continue с label (`labelBreak`/`labelCont` карти).
+- ✅ Switch-изрази, ternary в повече позиции (`?:` с eval-блогове + assignment-клонове).
+- ✅ Short-circuit `&&`/`||` (RHS само когато LHS не решава), compound `+= -= *= /= %=`,
+  `++`/`--` pre/post, assignment-as-expression (`(x = e)`, като аргумент).
+- ✅ Latent bugfix: bare-name MethodInvocation оценяваше args два пъти.
 
 ## P5 — Exceptions
 - `throw`, `try/catch/finally`, runtime unwinding (frame таблици от компилатора).

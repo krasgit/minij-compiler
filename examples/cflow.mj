@@ -1,0 +1,72 @@
+// P4: control-flow правилност — short-circuit && / ||,
+// compound присвоявания, ++/--, labeled break/continue,
+// enhanced-for, assignment-as-expression.
+
+class Card {
+    int v;
+    Card(int x) { v = x; }
+    int get() { return v; }
+}
+
+class CFlow {
+    static int side;
+
+    static int bump() { side = side + 1; return side; }
+
+    static int main() {
+        int a = 1;
+        int b = 0;
+        int u = 0;
+        side = 0;
+        if (a == 0 && bump() == 1) u = 10;       // RHS не трябва да се изпълни
+        if (b == 1 || bump() == 1) u = 20;       // RHS се изпълнява точно веднъж
+        if (a == 1 && bump() == 2) u = 30;       // двете страни са true
+        k_println_i32(u);                        // 30
+        k_println_i32(side);                     // 2 (short-circuit: bump не се вика 3 пъти)
+
+        int q = 10;
+        q += 5;
+        q *= 2;
+        q -= 8;
+        int pre = ++q;
+        int post = q--;
+        k_println_i32(pre);                      // 23
+        k_println_i32(post);                     // 23
+        k_println_i32(q);                        // 22
+
+        int s = 0;
+        outer: for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 3; j++) {
+                if (j == 1) continue;
+                if (i == 2) break outer;
+                s = s + 10;
+            }
+        }
+        k_println_i32(s);                        // 40
+
+        int[] arr = new int[3];
+        arr[0] = 7; arr[1] = 8; arr[2] = 9;
+        int tot = 0;
+        for (int v : arr) tot += v;
+        k_println_i32(tot);                      // 24
+
+        Card[] cs = new Card[2];
+        cs[0] = new Card(11);
+        cs[1] = new Card(22);
+        int ct = 0;
+        for (Card c : cs) ct += c.get();
+        k_println_i32(ct);                       // 33
+
+        int x = 5;
+        int w = (x = x + 3);
+        k_println_i32(w);                        // 8
+
+        int[] m = new int[2];
+        m[0] = 100;
+        m[0] += bump();
+        k_println_i32(m[0]);                     // 103
+        k_println_i32(side);                     // 3
+
+        return 0;
+    }
+}

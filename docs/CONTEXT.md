@@ -54,7 +54,7 @@ regression + docs + commit + push.
   → **`1ac9d83` P3 `Foo[]` масиви от обекти (обj9; 27/27)** → **`ee95a94` P3 `void` методи +
   `static void main` (обj10; 28/28)**
 
-## Status (актуално към HEAD = ee95a94, регресия 28/28)
+## Status (актуално към HEAD = ee95a94 + P4-Control работи; регресия 29/29)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
@@ -69,9 +69,12 @@ regression + docs + commit + push.
   **P3 `Foo[]` масиви от обекти (27/27 — obj9.mj, без frontend промени — vtable+fields
   от obj6-obj8 покриват всичко; проверки с ObjArrProbe2)**;
   **P3 `void` методи + `static void main` (28/28 — obj10.mj, `mapType("void")→"void"`,
-  arm rule `return()` с `mov x0,#0`)**.
-- ACTIVE: P3 обекти e **завършен** (вкл. void). Следва P4-Control или P3.5 GC (виж NEXT MOVE).
-- Regression: **28/28 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+  arm rule `return()` с `mov x0,#0`)**;
+  **P4-Control (29/29 — cflow.mj): short-circuit `&&`/`||`, compound `+= -= *= /= %=`, `++`/`--`
+  pre/post, assignment-as-expression, labeled break/continue, enhanced-for, `for(;;)`, латентен
+  bugfix bare-name MethodInvocation double-arg-eval**.
+- ACTIVE: P4-Control е **завършен**. Следва решение P3.5 GC vs P5 (виж NEXT MOVE).
+- Regression: **29/29 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
   str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
   **obj** (`5/7/6/12`, `1/2/3/1`, exit 2),
@@ -83,20 +86,20 @@ regression + docs + commit + push.
   **obj7** (`2/2/3/4/100/100/107/2/2`, exit 42),
   **obj8** (`3/8/10/6/96/996/11/102/15/15`, exit 42),
   **obj9** (`28/11/1/15/25/5/5/4`, exit 42),
-  **obj10** (`1/2/3/1/2/42`, exit 0).
+  **obj10** (`1/2/3/1/2/42`, exit 0),
+  **cflow** (`30/2/23/23/22/40/24/33/8/103/3`, exit 0).
 
 ## NEXT MOVE (при "continue")
 
-P3 e **завършен** (вкл. `void` методи + `static void main`, obj10, 28/28) → следва:
-1. **P4-Control** (слота е в docs/ROADMAP.md) — контроля flow: `for`/`while`/`do-while`/`break`/
-   `continue`/`switch`/`?:` са support-нати поне частично от P0-P2, но P4 ги довършва като
-   полноценен милстон (документиране, edge-cases, `&&`/`||` short-circuit, `?:` assignable).
-   ИЛИ
-2. **P3.5 GC решение** — досега паметта е arena/без free-ване; GC (mark-sweep по vtables земя)
-   е големият риск за P4+. Препоръчвам да се вземе решение с потребителя преди P4.
+**P4-Control e завършен** (cflow; 29/29) → следва избор между:
+1. **P3.5 GC решение** — паметта е arena/без free-ване от P0; GC (mark-sweep по vtables/header
+   seam от P3) е големият риск за P5+ (exceptions не произвеждат контейнери, но P7 threads ще
+   искат). Решение: (A) ръчен conservative mark&sweep по stack scan или (B) MMTk binding.
+   Seam-ът (header class index + pad, `mm_alloc`) е готов от P3.
+2. **P5 Exceptions** — `throw`, `try/catch/finally`, frame-таблица за unwinding, Exception класове.
 
 Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `run_tests.sh`
-(28/28→N/N) → README/ROADMAP/CONTEXT → комит+push.
+(29/29→N/N) → README/ROADMAP/CONTEXT → комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
 
@@ -154,6 +157,43 @@ P3 e **завършен** (вкл. `void` методи + `static void main`, obj
   $0, %eax` пред `jmp ${exit}`; x86 es локально не-тестляем — aarch64-only binutils). Пример
   `examples/obj10.mj` (instance `reset()/add1()` + static `printAll()` + изрични `return;` +
   инт-методи + `static void main`) → `1/2/3/1/2/42`, exit 0.
+- **P4-Control (cflow, проверено — всичките по-долу са прогонени в /tmp/opencode)**:
+  `Java.LabeledStatement`/`Block`/`If`/`For`/`While`/`Do`/`ForEach`/`Break`/`Continue` всичките
+  имплементират `Java.BlockStatement` → разпознават се в `stmt(Java.BlockStatement)`. Labeled:
+  `label: Тяло` → карти `labelBreak`/`labelCont` (label → Ir.Block), `break lbl`/`continue lbl`
+  резолват от тях (иначе `# break label not in scope:` + токо-блок); unlabeled break/continue
+  ползват стека `breaks`/`conts`. **`continue lbl` за for → step-блока, за while/do → head-блока,
+  за for-each → feat_ step-блока.** Non-loop labeled тяло → `lblb_<id>` exit блок.
+- **Enhanced-for shape (проверено)**: `for (T x : arr)` = **`Java.ForEachStatement`**, полета
+  `currentElement` (FormalParameter: `name`, `type`), `expression` (Rvalue), `body`;
+  ForEachStatement наследява `Java.ContinuableStatement` → `.body` е на ancestor-а (родител на
+  `expression`!). Lowering: alloca counter `_ec<id>` + блокове `feh_/feb_/fest_/fex_`;
+  `len`+`cmplt`, body: `chk`+`lea_<elIr>`+`ld_<elIr>` → store в елементния alloca `_e<id>`;
+  continue → `fest_` (step), break → `fex_`. **Елементният слот СЛУЖИ като SSA phi (SSA промотира
+  всички alloca-та) → задължително инициализирай с `const 0 EL`-тип преди цикъла**: иначе
+  entry-edge стойността на phi-я няма localocation, regalloc я слага в скретч `w9` → 2-arg
+  `MOV_i64(ptr)` = `mov x28, w9` → operand mismatch при as. (i32 елементите минават случайно — и
+  двете са w-reg.) `for (;;)` → `f.update` може да е **null** (не празен масив) → guard.
+- **Short-circuit `&&`/`||`**: бяха `BinaryOperation(operator=&&/||)`, lowered eager като
+  `and`/`or` (RHS винаги вали). Сега `expr()` → `scAndOr(b, isAnd)`: alloca tmp i32, блокове
+  `sc_<id>_e(else)/_o(out)/_j(join)`, `cmpeq`/`cmpne` с `konst(0, c.type)`; `&&`: lhs==0 → store 0,
+  иначе eval rhs → `cmpne(rv,0)` → store; `||`: lhs!=0 → store 1. Връща load i32 (1/0). Правилата
+  `AND_i32`/`OR_i32` остават — subtypeTest OR-веригата (obj5) ги ползва.
+- **Compound + assignment/c-crement (expr-стойности)**: `handleAssign` игнорираше `operator` →
+  `a += 1` тихо ставаше `a = 1`. Сега: `Tgt(ptr, t, isAlloca)` record; `tgtFor` покрива
+  ArrayAccess(`chk`+`lea_<el>`), AmbigName>1 (fieldAddr), локал-име (allocaOf → `load`/`store`),
+  fieldThis, SuperclassFieldAccessExpression, FieldAccessExpression; `readTgt`/`writeTgt` =
+  `load`/`store` или `ld_<t>`/`st_<t>` (по isAlloca). `assignVal`: `=` → conv(expr(rhs))+write;
+  compound (`+= -= *= /= %=`) → `wide()`(lhs.ir,r.ir) → conv → `mapOp(чист binop)` → conv обратно →
+  write; **compound/assign връщат стойността** (assignment-as-expression). `Java.Crement` полета:
+  `pre` (boolean), `operator` ("++"/"--"), `operand` (Lvalue); `crementVal` = readTgt + add/sub 1 +
+  writeTgt; pre → new, post → old; → работи `a[i]++`, `a[i++][j]--` и като функция-арг.
+- **MethodInvocation double-arg-eval (латентен bugfix, ВАЖНО)**: bare-name path (expr ред ~1571)
+  оценяваше ALL args в общ `args` списък ПРЕДИ resolve-а и пак в `cargs` за call-а → `f(bump())`
+  викаше bump-а два пъти, `f(a=f(b))` даваше грешка (36 вместо 16). Фикс: args се оценяват ВЕДНЪЖ
+  в конкретния клон (sysout/msiglist/native), И винаги **ПРЕДИ** `emit("call")` — call-ът трябва да
+  стои СЛЕД arg-инструкциите в IR/asm потока, иначе x0/x1 четат scratch garbage (obj10/print/str с
+  `k_println_i32(c.bump())` дефакто го доказаха).
 - **П3 наследяване `extends` + `super(...)` (obj5, проверено)**: `NamedClassDeclaration.extendedType`
   е `Java.ReferenceType` c `identifiers=[Име]` (или null). Frontend dържи `classSuper (cls→super)` и
   `allDecls (cls→decl)`; Main прави 3 pre-pass-a: `collectClass` (рекурсия в super-а ПЪРВО, цикличен
@@ -313,13 +353,16 @@ P3 e **завършен** (вкл. `void` методи + `static void main`, obj
 
 ## Testing
 
-- `cd /tmp/opencode && bash run_tests.sh` → build + 28 теста; текущ резултат **28/28**.
+- `cd /tmp/opencode && bash run_tests.sh` → build + 29 теста; текущ резултат **29/29**.
   (Може да отнеме >2 мин — таймаут-ът на bash tool трябва да е ~400s.)
 - Тест функции: `run name src exitcode`, `run_out name src exitcode $'expected\nout\n'`;
   добавяне на нов пример = `run_out obj10 "$DIR/examples/obj10.mj" 0 $'1\n2\n3\n1\n2\n42\n'`
   + обновяват се броя и README/ROADMAP/CONTEXT.
 - Примерни файлове за multi-D: `examples/md.mj`. OOB multi-D (m7/m8 .mj в /tmp/opencode) → exit 134.
 - Отделни минимални програми за бисouter (m1..m8.mj) стоят в /tmp/opencode; не се комитват.
+- P4 edge-тестове в /tmp/opencode: t4a–t4g (short-circuit, ternary+assign, labeled, for-each,
+  compound), e1–e7 (labeled continue/break do/for, compound на масив елемент+`a[i++]++`, &&-вериги
+  със side-effect, for-each обекти/String/2D, assignment-as-arg, `for(;;)`). Не се комитват.
 
 ## Relevant Files (карта)
 
@@ -339,7 +382,10 @@ P3 e **завършен** (вкл. `void` методи + `static void main`, obj
   superFieldAddr (SuperclassFieldAccessExpression read+write), isSuperNode**;
   **Foo[]: без промени — elemOf `classIndex` branch + FieldAccessExpression/classSigs с
   ArrayAccessExpression база (обj9, проверено с ObjArrProbe2)**;
-  **void: mapType("void")→"void" (обj10)**).
+  **void: mapType("void")→"void" (обj10)**;
+  **P4: labelBreak/labelCont карти, stmt() диспеч по While/Do/For/ForEach/Labeled, helpers
+  doWhileStmt/doStmt/forStmt(lbl)/forEachStmt, scAndOr (&&/||), assignVal/Tgt/tgtFor/readTgt/
+  writeTgt (compound += -= *= /= %=), crementVal (++/--), MethodInvocation args-eval bugfix**).
 - `common/Emitter.java` — spill support (spillTemp/spillBytes/stemp/slotMem/spillLoad/spillStore/
   prepareSpills/saveSpills/maxSpillBytes), x86 ptr→movq, template interpreter + Ctx,
   **`${cargs}` loop-list (base=1), vtables в `.data` (R_AARCH64_RELATIVE → не .rodata),
@@ -358,8 +404,8 @@ P3 e **завършен** (вкл. `void` методи + `static void main`, obj
   k_println_i32`, `k_newline`, **`k_string_equals`/`k_string_concat`**), mm_alloc, syscalls.
 - `examples/*.mj` — hello, gcd, fib, forloop, dowhile, ternary, switch, print, dbl, lng, mix,
   arrays, oob, str, str2, md, str3, obj, obj2, **obj3**, **obj4**, **obj5**, **obj6**,
-  **obj7**, **obj8**, **obj9**, **obj10**, native.
-- `/tmp/opencode/run_tests.sh` — regression harness (28 теста; беше оправен след corrupt edit:
+  **obj7**, **obj8**, **obj9**, **obj10**, **cflow**, native.
+- `/tmp/opencode/run_tests.sh` — regression harness (29 теста; беше оправен след corrupt edit:
   `run_out` без `}`/без `got=$?`, орязани expected-out за dbl/arrays/md).
 - `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD/SE/**OProbe**/OProbe2/OProbe3/**StProbe**/
   StProbe2/StProbe3/StProbe4/**SupProbe**/SupProbe2/SupProbe3/SupProbe4) — Janino AST probes,
