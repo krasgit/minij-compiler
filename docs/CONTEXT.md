@@ -52,9 +52,9 @@ regression + docs + commit + push.
   **`580c5fd` P3 vtable dispatch + override (обj6; README/ROADMAP вкл в същия комит)**
   → **`5a17f16` P3 static полета (обj7)`.** → **P3 явен super.method/field (обj8, HEAD)**
   → **`1ac9d83` P3 `Foo[]` масиви от обекти (обj9; 27/27)** → **`ee95a94` P3 `void` методи +
-  `static void main` (обj10; 28/28)**
+  `static void main` (обj10; 28/28)** → **`be8233d` P4 control flow (cflow; 29/29)**
 
-## Status (актуално към HEAD = ee95a94 + P4-Control работи; регресия 29/29)
+## Status (актуално към HEAD = be8233d, регресия 29/29)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
