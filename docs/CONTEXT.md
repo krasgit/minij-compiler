@@ -53,9 +53,9 @@ regression + docs + commit + push.
   → **`5a17f16` P3 static полета (обj7)`.** → **P3 явен super.method/field (обj8, HEAD)**
   → **`1ac9d83` P3 `Foo[]` масиви от обекти (обj9; 27/27)** → **`ee95a94` P3 `void` методи +
   `static void main` (обj10; 28/28)** → **`be8233d` P4 control flow (cflow; 29/29)**
-  → **`87212e8` P5 exceptions (exc; 30/30)**
+  → **`961995e` P5 exceptions (exc; 30/30)**
 
-## Status (актуално към HEAD = 87212e8, регресия 30/30)
+## Status (актуално към HEAD = 961995e, регресия 30/30)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
