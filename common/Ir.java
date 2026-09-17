@@ -18,6 +18,13 @@ public class Ir {
         public String name, retType = "i32";
         public List<String[]> params = new ArrayList<>();
         public List<Block> blocks = new ArrayList<>();
+        // P5 exception handling: stack variables that must NOT be SSA-promoted
+        // (stay in memory so exception handlers can restore them), plus the
+        // dispatcher/handler wiring emitted by the frontend.
+        public Set<String> ehVars = new LinkedHashSet<>();
+        public List<String[]> ehCatch = new ArrayList<>();   // { dspId, handlerBlock, kindsCsv }
+        public List<String[]> ehFin = new ArrayList<>();     // { dspId, finBlock }
+        public List<String[]> ehSrc = new ArrayList<>();     // { predBlock, handlerBlock } synthetic edges
     }
     public static class VTable {
         public String label;
@@ -111,6 +118,17 @@ public class Ir {
             for (Block b : f.blocks) for (Value v : b.ins) for (Value a : v.args)
                 if (a != null && (a.op.equals("param")||a.op.startsWith("PARAM_")) && seen.add(a))
                     sb.append("  .param %").append(id(a)).append(" ").append(a.imm).append("\n");
+            if (!f.ehVars.isEmpty()) {
+                sb.append("  .ehvar");
+                for (String n : f.ehVars) sb.append(" ").append(n);
+                sb.append("\n");
+            }
+            for (String[] c : f.ehCatch)
+                sb.append("  .ehcatch ").append(c[0]).append(" ").append(c[1]).append(" ").append(c[2]).append("\n");
+            for (String[] c : f.ehFin)
+                sb.append("  .ehfin ").append(c[0]).append(" ").append(c[1]).append("\n");
+            for (String[] c : f.ehSrc)
+                sb.append("  .ehsrc ").append(c[0]).append(" ").append(c[1]).append("\n");
             for (Block b : f.blocks) {
                 sb.append("  ").append(b.name).append(" {\n");
                 for (Value v : b.ins) ins(v);
@@ -140,6 +158,7 @@ public class Ir {
                 sb.append(")").append(d).append("\n"); return;
             }
             if (o.equals("block")||o.equals("symbol")||o.equals("undef")) return;
+            if (o.equals("EH_LAB")) { sb.append("    %").append(id(v)).append(" = EH_LAB ").append(v.name != null ? v.name : "0").append(d).append("\n"); return; }
             sb.append("    %").append(id(v)).append(" = ").append(o).append(" ").append(v.type);
             for (Value a : v.args) sb.append(" %").append(id(a));
             if ((o.equals("const")||o.startsWith("CONST_")) && v.args.isEmpty()) sb.append(" ").append(v.imm);
@@ -271,6 +290,27 @@ public class Ir {
                     if (cur != null && pv.imm < cur.params.size()) pv.type = cur.params.get((int)pv.imm)[1];
                     next(); continue;
                 }
+                if (l.startsWith(".ehvar")) {
+                    String[] pp = l.split("\\s+");
+                    for (int i = 1; i < pp.length; i++) if (!pp[i].isEmpty()) cur.ehVars.add(pp[i]);
+                    next(); continue;
+                }
+                if (l.startsWith(".ehcatch")) {
+                    String[] pp = l.split("\\s+");
+                    if (pp.length >= 4) cur.ehCatch.add(new String[]{pp[1], pp[2], pp[3]});
+                    else if (pp.length == 3) cur.ehCatch.add(new String[]{pp[1], pp[2], ""});
+                    next(); continue;
+                }
+                if (l.startsWith(".ehfin")) {
+                    String[] pp = l.split("\\s+");
+                    if (pp.length >= 3) cur.ehFin.add(new String[]{pp[1], pp[2]});
+                    next(); continue;
+                }
+                if (l.startsWith(".ehsrc")) {
+                    String[] pp = l.split("\\s+");
+                    if (pp.length >= 3) cur.ehSrc.add(new String[]{pp[1], pp[2]});
+                    next(); continue;
+                }
                 if (l.endsWith("{") && !l.startsWith(".")) {
                     String bn = l.substring(0, l.length()-1).trim();
                     Block b = new Block(bn); cur.blocks.add(b); blocks.put(bn, b); curB = b;
@@ -319,6 +359,9 @@ public class Ir {
             String[] parts = s.split("\\s+");
             Value v = new Value(); v.op = parts[0];
             if (v.op.equals("alloca")) { v.type = parts.length>1?parts[1]:"i32"; return v; }
+            if (v.op.equals("EH_LAB")) { v.name = parts.length>1 ? parts[1] : "0"; v.type = "ptr"; return v; }
+            if (v.op.equals("FP")) { v.type = "ptr"; return v; }
+            if (v.op.equals("EH_EXC")) { v.type = "ptr"; return v; }
             if (v.op.startsWith("CONST_") || v.op.equals("const")) { v.type=parts[1]; v.imm=Long.parseLong(parts[2]); return v; }
             if (v.op.startsWith("PARAM_") || v.op.equals("param")) { v.type=parts[1]; v.imm=Long.parseLong(parts[2]); return v; }
             if (v.op.startsWith("CALL_") || v.op.equals("call") || v.op.equals("lea_static")) {

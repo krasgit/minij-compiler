@@ -95,6 +95,13 @@ public class Emitter {
         fn = f;
         out.append("    .globl ").append(f.name).append("\n").append(f.name).append(":\n");
         spillBytes = align16(maxSpillBytes(f));
+        int alc = 176 + spillBytes, xi = 248;
+        for (Ir.Block b : f.blocks) for (Ir.Value v : b.ins)
+            if (v.op.equals("alloca") || v.op.equals("ALLOCA")) {
+                if (arch.equals("arm64")) { alc += 8; allocaOff.put(v, alc); }
+                else { allocaOff.put(v, xi); xi += 8; }
+            }
+        if (arch.equals("arm64")) spillBytes = align16(Math.max(spillBytes, alc - 176));
         StringBuilder save = out;
         StringBuilder prow = new StringBuilder();
         out = prow;
@@ -109,6 +116,7 @@ public class Emitter {
         out.append(exit()).append(":\n");
         if (spillBytes > 0 && arch.equals("arm64")) out.append("    add sp, sp, #").append(spillBytes).append("\n");
         expand(R.epilogue);
+        if (!f.ehCatch.isEmpty() || !f.ehFin.isEmpty()) { out.append("\n"); ehDispatchers(); }
         out.append("\n");
     }
 
@@ -139,9 +147,108 @@ public class Emitter {
     }
     String exit() { return ".L" + fn.name.replace("$", "_") + "_exit"; }
 
+    // ─── P5: exception dispatchers ─────────────────────────────────────────
+    String dspLabel(String id) { return ".L" + fn.name.replace("$", "_") + "_dsp_" + id; }
+
+    void ehDispatchers() {
+        Map<String, Ir.Block> byName = new LinkedHashMap<>();
+        for (Ir.Block b : fn.blocks) byName.put(b.name, b);
+        Map<String, Ir.Block> finDsp = new LinkedHashMap<>();
+        for (String[] c : fn.ehFin) if (c.length >= 2 && c[1] != null && byName.containsKey(c[1])) finDsp.put(c[0], byName.get(c[1]));
+        Map<String, List<String[]>> catDsp = new LinkedHashMap<>();
+        for (String[] c : fn.ehCatch) if (c.length >= 3) catDsp.computeIfAbsent(c[0], k -> new ArrayList<>()).add(c);
+        List<String> ids = new ArrayList<>();
+        for (String[] c : fn.ehCatch) if (c[0] != null && !ids.contains(c[0])) ids.add(c[0]);
+        for (String[] c : fn.ehFin) if (c[0] != null && !ids.contains(c[0])) ids.add(c[0]);
+        for (String id : ids) {
+            out.append(dspLabel(id)).append(":\n");
+            int mi = 0, ni = 0;
+            if (arch.equals("arm64")) {
+                out.append("    ldr w9, [x0]\n");
+                for (String[] c : catDsp.getOrDefault(id, List.of())) {
+                    Ir.Block hb = byName.get(c[1]);
+                    if (hb == null) continue;
+                    for (String k : c[2].split(",")) {
+                        k = k.trim(); if (k.isEmpty()) continue;
+                        out.append("    mov w10, #").append(k).append("\n");
+                        out.append("    cmp w9, w10\n");
+                        out.append("    b.eq .L").append(dspLabel(id).substring(2)).append("_m").append(mi).append("\n");
+                    }
+                    out.append("    b .L").append(dspLabel(id).substring(2)).append("_n").append(ni++).append("\n");
+                    out.append(".L").append(dspLabel(id).substring(2)).append("_m").append(mi++).append(":\n");
+                    ehRestore();
+                    out.append("    b ").append(lbl(fn, hb)).append("\n");
+                    out.append(".L").append(dspLabel(id).substring(2)).append("_n").append(ni - 1).append(":\n");
+                }
+                Ir.Block finb = finDsp.get(id);
+                if (finb != null) { ehRestore(); out.append("    b ").append(lbl(fn, finb)).append("\n"); }
+                else out.append("    mov x0, #0\n    ret\n");
+            } else {
+                out.append("    movl (%rdi), %r10d\n");
+                for (String[] c : catDsp.getOrDefault(id, List.of())) {
+                    Ir.Block hb = byName.get(c[1]);
+                    if (hb == null) continue;
+                    for (String k : c[2].split(",")) {
+                        k = k.trim(); if (k.isEmpty()) continue;
+                        out.append("    cmpl $").append(k).append(", %r10d\n");
+                        out.append("    je .L").append(dspLabel(id).substring(2)).append("_m").append(mi).append("\n");
+                    }
+                    out.append("    jmp .L").append(dspLabel(id).substring(2)).append("_n").append(ni++).append("\n");
+                    out.append(".L").append(dspLabel(id).substring(2)).append("_m").append(mi++).append(":\n");
+                    ehRestore();
+                    out.append("    jmp ").append(lbl(fn, hb)).append("\n");
+                    out.append(".L").append(dspLabel(id).substring(2)).append("_n").append(ni - 1).append(":\n");
+                }
+                Ir.Block finb = finDsp.get(id);
+                if (finb != null) { ehRestore(); out.append("    jmp ").append(lbl(fn, finb)).append("\n"); }
+                else out.append("    xorl %eax, %eax\n    retq\n");
+            }
+            out.append("\n");
+        }
+    }
+
+    void ehRestore() {
+        if (arch.equals("arm64")) {
+            out.append("    ldr x9, [x1]\n");
+            out.append("    adrp x10, exc_head\n");
+            out.append("    add x10, x10, :lo12:exc_head\n");
+            out.append("    str x9, [x10]\n");
+            out.append("    ldr x10, [x1, #8]\n");
+            out.append("    mov x29, x10\n");
+            out.append("    sub sp, x29, #").append(176 + spillBytes).append("\n");
+        } else {
+            out.append("    movq (%rsi), %r11\n");
+            out.append("    leaq exc_head(%rip), %r10\n");
+            out.append("    movq %r11, (%r10)\n");
+            out.append("    movq 8(%rsi), %r10\n");
+            out.append("    movq %r10, %rbp\n");
+            out.append("    subq $240, %rsp\n");
+        }
+    }
+
     // ─── instruction selection ──────────────────────────────────────────────
+    Map<Ir.Value, Integer> allocaOff = new HashMap<>();
+
     void ins(Ir.Value v) {
         line(v);
+        if ((v.op.equals("store") || v.op.equals("STORE_i32") || v.op.equals("load") || v.op.equals("LOAD_i32"))
+                && !v.args.isEmpty() && allocaOff.containsKey(v.args.get(0))) {
+            boolean st = v.op.equals("store") || v.op.equals("STORE_i32");
+            Ir.Value deal = st ? v.args.get(1) : v;
+            int off = allocaOff.get(v.args.get(0));
+            prepareSpills(v);
+            String r = R.width(reg(deal), deal.type);
+            if (arch.equals("arm64"))
+                out.append("    ").append(st ? "str " : "ldr ").append(r).append(", [x29, #-").append(off).append("]\n");
+            else {
+                String m = R.isFpType(deal.type) ? "movsd " : (deal.type != null &&
+                    (deal.type.equals("i64") || deal.type.equals("ptr") || deal.type.equals("address")) ? "movq " : "movl ");
+                out.append("    ").append(st ? m + r + ", -" + off + "(%rbp)\n"
+                                              : m + "-" + off + "(%rbp), " + r + "\n");
+            }
+            saveSpills(v);
+            return;
+        }
         String can = canon(v.op);
         if (SKIP.contains(v.op) || SKIP.contains(can)) return;
         List<RuleParser.Rule> rs = R.ops.get(can);
@@ -321,7 +428,8 @@ public class Emitter {
                     return m.toString();
                 }
             case "name":
-                if (cx == null || cx.v.name == null) throw new RuntimeException("emit: op has no symbol name");
+                if (cx == null || cx.v == null || cx.v.name == null) throw new RuntimeException("emit: op has no symbol name");
+                if (cx.v.op.equals("EH_LAB")) return dspLabel(cx.v.name);
                 return cx.v.name;
             case "ret":
                 if (cx == null) throw new RuntimeException("emit: ${ret} outside rule");

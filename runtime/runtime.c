@@ -170,3 +170,61 @@ void k_bounds_error(void) {
 int k_native_N_foo_1(int x) { return x * 2; }
 double k_native_N_fp_1(double x) { return x * 2.0; }
 long k_native_N_lng_1(long x) { return x + 1L; }
+
+/* ── exception support (P5) ─────────────────────────────────────────────── */
+
+typedef struct exc_rec {
+    struct exc_rec *prev;
+    void *fp;
+    int (*handler)(void*, void*);
+} ExcRec;
+
+#define EXC_MAX_DEPTH 128
+static ExcRec exc_pool[EXC_MAX_DEPTH];
+static int exc_depth = 0;
+
+void *exc_head = 0;
+
+/* k_exc_push: try-entry pushes a record with dispatcher label + caller fp;
+ * returns the record so the normal path can k_exc_pop it. */
+void *k_exc_push(void *dsp, long fp) {
+    if (exc_depth >= EXC_MAX_DEPTH) sys_exit(77);
+    ExcRec *r = &exc_pool[exc_depth++];
+    r->handler = (int (*)(void*, void*)) dsp;
+    r->fp = (void*) fp;
+    r->prev = (ExcRec*) exc_head;
+    exc_head = r;
+    return r;
+}
+
+void k_exc_pop(void *rec) {
+    ExcRec *r = (ExcRec*) rec;
+    if (exc_head == r) {
+        exc_head = r->prev;
+        if (exc_depth > 0) exc_depth--;
+    }
+}
+
+/* k_throw: never returns. Walk chain; dispatch to handlers. */
+void k_throw(void *e) {
+    for (;;) {
+        ExcRec *r = (ExcRec*) exc_head;
+        if (r == 0) {
+            /* Uncaught exception: print class index and exit. */
+            if (e != 0) {
+                int ci = *(int*) e;
+                out_char('#'); out_digits((unsigned int) ci); out_char('\n');
+            }
+            sys_exit(3);
+        }
+        int matched = r->handler(e, r);
+        if (matched) {
+            /* Handler matched; dispatcher already popped exc_head and
+             * transferred control to the handler block. Return. */
+            return;
+        }
+        /* Non-match: pop and continue to the next record. */
+        exc_head = r->prev;
+        if (exc_depth > 0) exc_depth--;
+    }
+}

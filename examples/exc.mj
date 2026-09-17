@@ -1,0 +1,61 @@
+// P5: exception handling — throw / try-catch-finally / unwinding през calls.
+//
+// Класовете Exc / SubExc са обикновени MiniJ класове; matching-ът на
+// обработителите е по classIndex (subtypeIndexes → compile-time константи),
+// unfixing-ът минава през runtime exc-chain + per-try dispatcher.
+
+class Exc {
+    int code;
+    Exc(int c) { code = c; }
+    int get() { return code; }
+}
+
+class SubExc extends Exc {
+    int extra;
+    SubExc(int c, int x) { super(c); extra = x; }
+}
+
+class MiniEx {
+    static int trace;
+
+    static void note(int v) { trace = trace + v; k_println_i32(trace); }
+
+    // finally върви преди return-а
+    static int g() {
+        try {
+            return 50;
+        } finally {
+            note(400);
+        }
+    }
+
+    static void boom() {
+        throw new Exc(9);
+    }
+
+    static int main() {
+        trace = 0;
+        // 1) чист finally на нормален път
+        try {
+            note(10);
+        } finally {
+            note(100);
+        }
+        // 2) хвърляне на SubExc + catch по суперклас + finally след catch
+        try {
+            note(1);
+            throw new SubExc(7, 5);
+            note(2);                 // unreachable
+        } catch (Exc e) {
+            k_println_i32(e.get());  // 7 (динамично викане по наследник)
+            note(3);
+        } finally {
+            note(4);
+        }
+        // 3) return през finally + виртуално викане
+        k_println_i32(g());          // note(400) изпълнено, после 50
+        // 4) не-хваната грешка: unwind през кал-фрейм-а на boom() → print + exit 3
+        boom();
+        return 0;
+    }
+}

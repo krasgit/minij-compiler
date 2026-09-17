@@ -482,3 +482,12 @@ emit st_f64(a, v) {
 emit st_ptr(a, v) {
     movq ${v}, (${a})
 }
+emit EH_LAB() {
+    leaq ${name}(%rip), $dst
+}
+emit FP() {
+    movq %rbp, $dst
+}
+emit EH_EXC() {
+    movq %rdi, $dst
+}

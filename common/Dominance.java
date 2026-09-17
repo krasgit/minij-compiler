@@ -30,6 +30,12 @@ public class Dominance {
                 if (eb != null) { succs.get(b).add(eb); preds.get(eb).add(b); }
             }
         }
+        for (String[] es : f.ehSrc) {
+            Ir.Block p = null, h = null;
+            for (Ir.Block b : f.blocks) if (b.name.equals(es[0])) { p = b; break; }
+            for (Ir.Block b : f.blocks) if (b.name.equals(es[1])) { h = b; break; }
+            if (p != null && h != null && !succs.get(p).contains(h)) { succs.get(p).add(h); preds.get(h).add(p); }
+        }
         Deque<Ir.Block> q = new ArrayDeque<>();
         q.add(entry); order.add(entry); orderIdx.put(entry, 0);
         while (!q.isEmpty()) { Ir.Block b = q.poll();

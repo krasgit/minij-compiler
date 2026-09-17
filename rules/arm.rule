@@ -420,3 +420,13 @@ emit st_f64(a, v) {
 emit st_ptr(a, v) {
     str ${v}, [${a}]
 }
+emit EH_LAB() {
+    adrp ${scratch}, ${name}
+    add $dst, ${scratch}, :lo12:${name}
+}
+emit FP() {
+    mov $dst, x29
+}
+emit EH_EXC() {
+    mov $dst, x0
+}

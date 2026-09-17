@@ -8,6 +8,7 @@ public class Ssa {
         for (Ir.Block b : f.blocks) for (Ir.Value v : b.ins)
             if (v.op.equals("alloca")||v.op.equals("ALLOCA")) {
                 String n = dbg.declNames.get(v.dbg);
+                if (n != null && f.ehVars.contains(n)) continue;   // P5: exception-visible vars stay in memory
                 String nm = n != null ? n : ("__v" + System.identityHashCode(v));
                 prom.put(v, nm);
                 nameTypes.put(nm, v.type);

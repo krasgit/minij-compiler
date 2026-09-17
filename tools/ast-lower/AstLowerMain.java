@@ -27,6 +27,16 @@ public class AstLowerMain {
     String curClass = null;                                       // текущия клас на lowering (инстанс методи); null = static/native
     Deque<Ir.Block> breaks = new ArrayDeque<>(), conts = new ArrayDeque<>();
     Map<String, Ir.Block> labelBreak = new HashMap<>(), labelCont = new HashMap<>();
+    Deque<ExcGuard> guards = new ArrayDeque<>();
+    static class ExcGuard {
+        int id;
+        Ir.Value recAlloca;
+        Ir.Block after;
+        Java.Block fin;
+        boolean hasFin;
+        boolean popped;
+        boolean inOwnFin;
+    }
     int dbgSeq = 1;
 
     public static void main(String[] args) throws Exception {
@@ -460,6 +470,7 @@ public class AstLowerMain {
         f.name = sig != null ? sig.symbol : m.name;
         f.retType = sig != null ? sig.retIr : irType(getStr(m, "type"));
         curFunc = f; allocaOf.clear(); varType.clear(); varJType.clear(); breaks.clear(); conts.clear();
+        guards.clear();
         labelBreak.clear(); labelCont.clear();
         curClass = sig != null ? sig.cn : null;
         if (sig != null && !sig.isStatic) {
@@ -655,29 +666,187 @@ public class AstLowerMain {
             curFunc.blocks.add(exit); cur = exit;
         } else if (s instanceof Java.ReturnStatement r) {
             Object rv = get(r, "returnValue");
+            Ir.Value val = null;
             if (rv instanceof Java.Rvalue rvv) {
                 String rt = curFunc.retType;
-                if (rt.equals("void")) emit("return","void",expr(rvv));
-                else emit("return","void",conv(expr(rvv), rt));
-            } else emit("return","void");
+                if (rt.equals("void")) expr(rvv);
+                else val = conv(expr(rvv), rt);
+            }
+            if (unwindGuards()) {
+                if (val != null) emit("return","void",val);
+                else emit("return","void");
+            }
+        } else if (s instanceof Java.TryStatement ts) {
+            tryStmt(ts);
+        } else if (s instanceof Java.ThrowStatement th) {
+            throwStmt(th);
         } else if (s instanceof Java.Block b) {
             if (b.statements != null) for (Java.BlockStatement x : b.statements) stmt(x);
         } else if (s instanceof Java.BreakStatement bst) {
             Object lbl = get(bst, "label");
+            Ir.Block t = null;
             if (lbl != null) {
-                Ir.Block t = labelBreak.get(String.valueOf(lbl));
+                t = labelBreak.get(String.valueOf(lbl));
                 if (t == null) { System.err.println("# break label not in scope: " + lbl); t = breaks.isEmpty() ? null : breaks.peek(); }
-                if (t != null) emit("jump","void",blockRef(t));
-            } else if (!breaks.isEmpty()) emit("jump","void",blockRef(breaks.peek()));
+            } else if (!breaks.isEmpty()) t = breaks.peek();
+            if (t != null && unwindGuards()) emit("jump","void",blockRef(t));
         } else if (s instanceof Java.ContinueStatement cst) {
             Object lbl = get(cst, "label");
+            Ir.Block t = null;
             if (lbl != null) {
-                Ir.Block t = labelCont.get(String.valueOf(lbl));
+                t = labelCont.get(String.valueOf(lbl));
                 if (t == null) { System.err.println("# continue label not in scope: " + lbl); t = conts.isEmpty() ? null : conts.peek(); }
-                if (t != null) emit("jump","void",blockRef(t));
-            } else if (!conts.isEmpty()) emit("jump","void",blockRef(conts.peek()));
+            } else if (!conts.isEmpty()) t = conts.peek();
+            if (t != null && unwindGuards()) emit("jump","void",blockRef(t));
         } else if (s instanceof Java.EmptyStatement) {
         } else System.err.println("# unsupported stmt: " + s.getClass().getSimpleName());
+    }
+
+    // ─── P5: try/catch/finally + throw ──────────────────────────────────────
+    void throwStmt(Java.ThrowStatement th) {
+        Ir.Value e = conv(expr((Java.Rvalue) get(th, "expression")), "ptr");
+        Ir.Value c = emit("call","void"); c.name = "k_throw"; c.args.add(e); c.dbg = tag(th);
+        deadReturn();
+    }
+
+    void deadReturn() {
+        if (cur.term()==null || !Ir.isTerm(cur.term().op)) {
+            if (curFunc.retType.equals("void")) emit("return","void");
+            else emit("return","void", konst(0, curFunc.retType, -1));
+        }
+    }
+
+    void popRec(ExcGuard g) {
+        if (g.popped) return;
+        Ir.Value rv = emit("load","ptr", g.recAlloca); rv.dbg = -1;
+        Ir.Value c = emit("call","void"); c.name = "k_exc_pop"; c.args.add(rv); c.dbg = -1;
+        g.popped = true;
+    }
+
+    void finCopy(ExcGuard g) {
+        if (g.fin == null) return;
+        boolean was = g.inOwnFin;
+        g.inOwnFin = true;
+        try {
+            for (Java.BlockStatement s : g.fin.statements) if (s != null) stmt(s);
+        } finally { g.inOwnFin = was; }
+    }
+
+    boolean unwindGuards() {
+        if (!guards.isEmpty()) {
+            List<ExcGuard> chain = new ArrayList<>(guards);
+            for (int i = chain.size()-1; i >= 0; i--) {
+                ExcGuard g = chain.get(i);
+                if (!g.popped) popRec(g);
+                if (g.hasFin && !g.inOwnFin) {
+                    finCopy(g);
+                    if (cur.term()!=null && Ir.isTerm(cur.term().op)) return false;
+                }
+            }
+        }
+        return cur.term()==null || !Ir.isTerm(cur.term().op);
+    }
+
+    void tryStmt(Java.TryStatement ts) {
+        Object bodyO = get(ts, "body");
+        List<?> cats = getList(ts, "catchClauses");
+        Java.Block fin = (Java.Block) get(ts, "finallY");
+        boolean hasCat = cats != null && !cats.isEmpty();
+        boolean hasFin = fin != null && fin.statements != null && !fin.statements.isEmpty();
+        if (!hasCat && !hasFin) {
+            if (bodyO instanceof Java.BlockStatement bs) stmt(bs);
+            return;
+        }
+        int id = dbgSeq++;
+        ExcGuard g = new ExcGuard();
+        g.id = id; g.fin = hasFin ? fin : null; g.hasFin = hasFin;
+        g.after = new Ir.Block("eha_" + id);
+        g.popped = false; g.inOwnFin = false;
+        guards.push(g);
+        String recName = "__rec_" + id;
+        Ir.Value aRec = null;
+        {
+            Ir.Value a = emit("alloca","ptr"); a.dbg = dbgSeq++;
+            aRec = a;
+            allocaOf.put(recName, a); varType.put(recName, "ptr");
+            prog.debug.declNames.put(a.dbg, recName);
+            prog.debug.declTypes.put(a.dbg, "ptr");
+            curFunc.ehVars.add(recName);
+            Ir.Value dsp = emit("EH_LAB","ptr"); dsp.name = String.valueOf(id); dsp.dbg = tag(ts);
+            Ir.Value fpv = emit("FP","ptr"); fpv.dbg = tag(ts);
+            Ir.Value push = emit("call","ptr"); push.name = "k_exc_push"; push.args.add(dsp); push.args.add(fpv); push.dbg = tag(ts);
+            Ir.Value st = emit("store","void",a,push); st.dbg = a.dbg;
+        }
+        g.recAlloca = aRec;
+        String entryName = curFunc.blocks.get(0).name;
+        if (bodyO instanceof Java.BlockStatement bs) stmt(bs);
+        if (cur.term()==null || !Ir.isTerm(cur.term().op)) {
+            popRec(g);
+            if (g.hasFin) finCopy(g);
+            if (cur.term()==null || !Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(g.after));
+        }
+        if (hasCat) {
+            int i = 0;
+            for (Object co : cats) {
+                if (!(co instanceof Java.CatchClause cf)) continue;
+                List<String> kinds = new ArrayList<>();
+                String pn = null, cty = null;
+                Java.Type[] ptypes = cf.catchParameter != null ? cf.catchParameter.types : null;
+                Object cbo = get(cf, "body");
+                if (ptypes != null) {
+                    for (Java.Type pt : ptypes) {
+                        cty = pt.toString();
+                        for (Integer k : subtypeIndexes(cty)) if (!kinds.contains(String.valueOf(k))) kinds.add(String.valueOf(k));
+                    }
+                    pn = cf.catchParameter.name;
+                }
+                if (pn == null) pn = "__c" + id + "_" + i;
+                Ir.Block hb = new Ir.Block("ehh_" + id + "_" + i);
+                curFunc.blocks.add(hb); cur = hb;
+                g.popped = true;
+                String dt = cty != null ? irType(cty) : "ptr";
+                Ir.Value aP = emit("alloca",dt); aP.dbg = dbgSeq++;
+                allocaOf.put(pn, aP); varType.put(pn, dt); varJType.put(pn, cty);
+                prog.debug.declNames.put(aP.dbg, pn);
+                prog.debug.declTypes.put(aP.dbg, dt);
+                curFunc.ehVars.add(pn);
+                Ir.Value eE = emit("EH_EXC","ptr"); eE.dbg = tag(co instanceof Java.Locatable ? (Java.Locatable) co : ts);
+                Ir.Value st2 = emit("store","void",aP,conv(eE,dt)); st2.dbg = aP.dbg;
+                curFunc.ehCatch.add(new String[]{String.valueOf(id), hb.name, String.join(",", kinds)});
+                curFunc.ehSrc.add(new String[]{entryName, hb.name});
+                if (cbo instanceof Java.BlockStatement bss) stmt(bss);
+                allocaOf.remove(pn); varType.remove(pn); varJType.remove(pn);
+                if (cur.term()==null || !Ir.isTerm(cur.term().op)) {
+                    if (g.hasFin && !g.inOwnFin) finCopy(g);
+                    if (cur.term()==null || !Ir.isTerm(cur.term().op)) emit("jump","void",blockRef(g.after));
+                }
+                i++;
+            }
+        }
+        if (g.hasFin) {
+            Ir.Block hf = new Ir.Block("ehf_" + id);
+            curFunc.blocks.add(hf); cur = hf;
+            curFunc.ehFin.add(new String[]{String.valueOf(id), hf.name});
+            curFunc.ehSrc.add(new String[]{entryName, hf.name});
+            String tn = "__exc" + id;
+            Ir.Value tA = emit("alloca","ptr"); tA.dbg = dbgSeq++;
+            allocaOf.put(tn, tA); varType.put(tn, "ptr");
+            prog.debug.declNames.put(tA.dbg, tn);
+            prog.debug.declTypes.put(tA.dbg, "ptr");
+            curFunc.ehVars.add(tn);
+            Ir.Value eE = emit("EH_EXC","ptr"); eE.dbg = tag(ts);
+            Ir.Value st3 = emit("store","void",tA,eE); st3.dbg = tA.dbg;
+            finCopy(g);
+            allocaOf.remove(tn); varType.remove(tn);
+            if (cur.term()==null || !Ir.isTerm(cur.term().op)) {
+                Ir.Value ld = emit("load","ptr",tA); ld.dbg = -1;
+                Ir.Value cT = emit("call","void"); cT.name = "k_throw"; cT.args.add(ld); cT.dbg = -1;
+                deadReturn();
+            }
+        }
+        curFunc.blocks.add(g.after); cur = g.after;
+        allocaOf.remove(recName); varType.remove(recName);
+        guards.pop();
     }
 
     void doWhileStmt(String lbl, Java.WhileStatement w) {
