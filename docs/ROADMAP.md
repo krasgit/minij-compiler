@@ -88,6 +88,25 @@
 > дава int, иначе връща типа на receiver-а (за да не счупи String dispatch-а).
 > Пример `str3.mj`; регресия **18/18 (arm64)**; x86 textual emit OK.
 
+## P2.5 — Пакети / import ✅ (done, imports; 31/31)
+- Проект от няколко `.mj` файла с `package` и `import` (single-type / on-demand / static).
+- **Статус (P2.5 — packages + import).** `ast-lower` зарежда **closure-а** на главния файл
+  транзитивно: всички `import` декларации ( `import pkg.Cls`, `import pkg.*`,
+  `import static pkg.Cls.m`, `import static pkg.Cls.*` ) и всички реферирани имена от
+  reflection walk по AST-то (всеки dotted `Java.ReferenceType`/`AmbiguousName`, с identity
+  `seen`-guard срещу цикли) се роутират като `pkg/Cls.mj` спрямо source root-овете
+  (директорията на входния файл + `-I dir`/`--src d1:d2` за ast-lower; `mc` приема `-I`).
+  Цикълът `units → imports → refs → resolve` върви до фикс-точка. Имената са в **flat
+  simple-name namespace**: дублиран клас или нееднозначен `pkg.*` → грешка; on-demand
+  resolve в `java.lang` + текущия пакет + `import pkg.*`-ите. Типовите имена от Java
+  (`geom.Geom`, `shapes.Circle`) се нормират до простото име **навсякъде** (`norm()` — с
+  `[]`-суфикси): `mapType`/`irType`/`elemOf`, сигнатури, `new`/`cast`/`instanceof`/
+  `new T[]`, локални, for-each, try-catch. Static import: квалифицирани
+  `Geom.setUnit(..)`/`Geom.UNIT` вървят по `classSigs`/`ambigStatic`, голите имена —
+  през `importedStaticMethod`/`importedStaticField` (read+write+type-inference).
+  Попътно: `mc` линква с **`-no-pie`** (PIE + vtables R_AARCH64_RELATIVE segfault-ваха под
+  qemu; връща 11 obj*/cflow примера). Пример `examples/imports/`; регресия **31/31 (arm64)**.
+
 ## P3 — Обекти
 - Symbol/type table, класове/полета/методи/overloads.
 - Object layout: **header дума** (class index + **monitor/bias bits** за P7 + GC bits space).

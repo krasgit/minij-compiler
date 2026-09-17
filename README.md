@@ -91,9 +91,8 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
     ./test.sh
 
-`/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
-не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **30/30 теста на arm64**
+Регресията се гони от **`scripts/run_tests.sh`** (ползва `./mc`; arm64 — нативен хост или
+qemu-aarch64 с `-L /usr/aarch64-linux-gnu`): **31/31 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
@@ -110,7 +109,8 @@ obj9 `28/11/1/15/25/5/5/4`, exit 42 (P3 масив от обекти),
 obj10 `1/2/3/1/2/42`, exit 0 (P3 void методи + `static void main`);
 cflow `30/2/23/23/22/40/24/33/8/103/3`, exit 0 (P4 control flow — short-circuit, compound, `++/--`,
 labeled loops, enhanced-for, assignment-as-expression);
-exc `10/110/111/7/114/118/518/50`, exit 3 (P5 exceptions); всеки — exit code + stdout чек).
+exc `10/110/111/7/114/118/518/50`, exit 3 (P5 exceptions),
+imports `12/9/4/10/40/12`, exit 0 (P2.5 packages + import); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -352,12 +352,37 @@ Exception обектите са обичайните MiniJ обекти от MM 
 SubException/`getMessage`, необработено в крайна сметка) → `10/110/111/7/114/118/518/50`, exit 3
 (uncaught). x86 backend също emit-ва (текстуално) — регресията върви само на arm64.
 
+### Пакети и import (P2.5)
+
+Един MiniJ проект може да се разбие на няколко `.mj` файла с `package` и `import` декларации.
+`ast-lower` зарежда транзитивно **closure-а** на главния файл: всички `import`-и (single-type
+`import pkg.Cls`, on-demand `import pkg.*`, статични `import static pkg.Cls.m` /
+`import static pkg.Cls.*`) и всички реферирани имена, събрани с reflection walk по AST-то (всеки
+dotted `Java.ReferenceType`, с identity `seen`-guard), се роутират като `pkg/Cls.mj` спрямо source
+root-овете: директорията на входния файл + `-I dir` / `--src d1:d2` за `ast-lower` (а `mc` приема
+`-I`). Цикълът `units → imports → refs → resolve` е фиксирана точка и продължава докато всички
+класове се заредят. Имената са в **flat simple-name namespace**: дублиран клас или нееднозначен
+`pkg.*` дават грешка; on-demand търси в `java.lang`, текущия пакет и `import pkg.*`-ите.
+
+Типовите имена от Java (`geom.Geom`, `shapes.Circle`) се свеждат до простото име **навсякъде**, където
+frontend-ът консумира тип-стринг — `norm()` (запазва `[]`-суфикси) в `mapType`/`irType`/`elemOf`,
+сигнатури, `new`/`cast`/`instanceof`/`new T[]`, локални, for-each, try-catch. Статични членове от
+`import static`: `Geom.setUnit(...)`/`Geom.UNIT` минават през съществуващия клас-квалифициран път
+(`classSigs`/`ambigStatic`), а **голите** имена (`setUnit(4)`, `UNIT`, `two(5)`) — през
+`importedStaticMethod`/`importedStaticField` (read + write + type-inference).
+
+Попътно (environment fix в `mc`): линква се с **`-no-pie`** — под qemu-aarch64 PIE +
+`R_AARCH64_RELATIVE` vtable relocations segfault-ваха програмите (11 от obj*/cflow примера);
+`-no-pie` ги върна в регресията. Пример `examples/imports/` (`geom/Geom.mj` със static поле/методи +
+`shapes/Circle.mj`/`shapes/Square.mj` с наследяване и override, `import shapes.*` +
+`import java.lang.String`) → `12/9/4/10/40/12`, exit 0.
+
 ## Пътна карта
 
 Пълен план P0–P8: [docs/ROADMAP.md](docs/ROADMAP.md).
 Core lib договор (API-огледало на java.base): [docs/corelib.md](docs/corelib.md).
 
-Кратко: P0 (инфраструктура/`.rule v2`) → P1 (типове) → P2 (памет/масиви/String) → P3 (обекти/header) → P3.5 (GC) → ~~P4 (контрол — done)~~ → ~~P5 (exceptions — done)~~ → P6 (core lib) → P7 (threads/concurrency) → P8 (модерен Java).
+Кратко: P0 (инфраструктура/`.rule v2`) → P1 (типове) → P2 (памет/масиви/String) → ~~P2.5 (packages/import — done)~~ → P3 (обекти/header) → P3.5 (GC) → ~~P4 (контрол — done)~~ → ~~P5 (exceptions — done)~~ → P6 (core lib) → P7 (threads/concurrency) → P8 (модерен Java).
 
 ## Структура
 

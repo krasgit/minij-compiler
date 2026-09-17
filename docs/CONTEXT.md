@@ -26,7 +26,8 @@ regression + docs + commit + push.
 
 - Repo: `/shared/compiler` — **noexec mount**: `./bin/*`, `build.sh`, `test.sh` не вървят там.
 - Build: `bash /shared/compiler/build.sh` (създава `/shared/compiler/out`).
-- Tests/run: от `/tmp/opencode` (работеща директория), скрипт `/tmp/opencode/run_tests.sh`.
+- Tests/run: **`scripts/run_tests.sh`** от repo-root (arm64 нативен или qemu-aarch64
+  `-L /usr/aarch64-linux-gnu`); /tmp/opencode е само за еднократни probes/edge-тестове.
 - CP: `$DIR/out:$DIR/lib/janino.jar:$DIR/lib/commons-compiler.jar`; RULE=`$DIR/rules/arm.rule`.
 - Pipeline (по ред): `JaninoParseMain` → `AstLowerMain`(.lir) → `SsaBuildMain`(.ssa) →
   `SsaOptMain`(.opt.ssa) → `SsaLowerMain`(.mir) → `RegallocMain .mir .alloc.mir --target=arm64 $RULE`
@@ -54,8 +55,9 @@ regression + docs + commit + push.
   → **`1ac9d83` P3 `Foo[]` масиви от обекти (обj9; 27/27)** → **`ee95a94` P3 `void` методи +
   `static void main` (обj10; 28/28)** → **`be8233d` P4 control flow (cflow; 29/29)**
   → **`961995e` P5 exceptions (exc; 30/30)**
+  → **`60c6ddb` import/packages (imports; 31/31; harness `scripts/run_tests.sh`; `-no-pie` link)**
 
-## Status (актуално към HEAD = 961995e, регресия 30/30)
+## Status (актуално към HEAD = 60c6ddb, регресия 31/31)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
@@ -78,9 +80,15 @@ regression + docs + commit + push.
   ops `EH_LAB`/`FP`/`EH_EXC`, func `.ehvar/.ehcatch/.ehfin/.ehsrc` metadata, per-try dispatcher
   с restore **преди** match-та (иначе stale `exc_head` re-catch в безкраен цикъл), `ExcRec` pool
   + `exc_head`, `k_throw` chain-walk → uncaught `#<classIndex>` exit 3, frontend
-  `ExcGuard`/`unwindGuards()` за return/break/continue + finally по 3-те пътя + `ehf` re-throw**.
-- ACTIVE: P5 е **завършен** (30/30). Следва P3.5 GC или P6 core lib (виж NEXT MOVE).
-- Regression: **30/30 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+  `ExcGuard`/`unwindGuards()` за return/break/continue + finally по 3-те пътя + `ehf` re-throw**;
+  **Packages + import (31/31 — examples/imports/imports.mj): single-type `import pkg.Cls`,
+  on-demand `import pkg.*`, static `import static pkg.Cls.m`/`import static pkg.Cls.*`, транзитивно
+  зареждане на модула чрез reflection walk (референциите се събират като dotted `ReferenceType`,
+  identity-seen цикъл-guard), пакетен префикс се нормира експлицитно (`norm()`), source root-ове
+  през `-I dir`/`--src d1:d2` на `ast-lower` (и `-I` в `mc`); `mc` линква с `-no-pie`.
+  Test harness: `scripts/run_tests.sh` (31 теста, arm64 нативен/qemu)**.
+- ACTIVE: Packages + import **завършени** (31/31). Следва P3.5 GC или P6 core lib (виж NEXT MOVE).
+- Regression: **31/31 PASS на arm64** (scripts/run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
   str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
   **obj** (`5/7/6/12`, `1/2/3/1`, exit 2),
@@ -94,11 +102,12 @@ regression + docs + commit + push.
   **obj9** (`28/11/1/15/25/5/5/4`, exit 42),
   **obj10** (`1/2/3/1/2/42`, exit 0),
   **cflow** (`30/2/23/23/22/40/24/33/8/103/3`, exit 0),
-  **exc** (`10/110/111/7/114/118/518/50`, exit 3 — uncaught).
+  **exc** (`10/110/111/7/114/118/518/50`, exit 3 — uncaught),
+  **imports** (`12/9/4/10/40/12`, exit 0 — packages/static import).
 
 ## NEXT MOVE (при "continue")
 
-**P5-Exceptions е завършен** (exc.mj; 30/30) → следва избор между:
+**Packages + import е завършен** (examples/imports/imports.mj; 31/31) → следва избор между:
 1. **P3.5 GC решение** — паметта е arena/без free-ване от P0; GC (mark-sweep по vtables/header
    seam от P3) е големият риск за P6+ (core lib обекти/контейнери, P7 threads).
    Решение: (A) ръчен conservative mark&sweep по stack scan или (B) MMTk binding.
@@ -107,8 +116,8 @@ regression + docs + commit + push.
    java.util (Arrays/Random), `corelib/` .mj + `natives.c` + `docs/corelib.md`; включва core
    Exception klасове (NumberFormat/IllegalArgument/NullPointer/ArrayIndexOutOfBounds) за P5.
 
-Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `run_tests.sh`
-(30/30→N/N) → README/ROADMAP/CONTEXT → комит+push.
+Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `scripts/run_tests.sh`
+(31/31→N/N) → README/ROADMAP/CONTEXT → комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
 
@@ -362,11 +371,16 @@ regression + docs + commit + push.
 
 ## Testing
 
-- `cd /tmp/opencode && bash run_tests.sh` → build + 29 теста; текущ резултат **29/29**.
+- `bash scripts/run_tests.sh` (от repo-root; self-contained) → build + **31/31** теста
+  (arm64 нативен хост или qemu-aarch64 с `-L /usr/aarch64-linux-gnu`; `--only=<name>` филтър).
   (Може да отнеме >2 мин — таймаут-ът на bash tool трябва да е ~400s.)
-- Тест функции: `run name src exitcode`, `run_out name src exitcode $'expected\nout\n'`;
-  добавяне на нов пример = `run_out obj10 "$DIR/examples/obj10.mj" 0 $'1\n2\n3\n1\n2\n42\n'`
-  + обновяват се броя и README/ROADMAP/CONTEXT.
+- Тест за нов пример = добавяне на `check <name> <exitcode> $'expected\ndata\n' <src>`
+  в `scripts/run_tests.sh` + обновяване на броя и README/ROADMAP/CONTEXT.
+- Примерни файлове за multi-D: `examples/md.mj`. OOB multi-D (m7/m8 .mj в /tmp/opencode) → exit 134.
+- Отделни минимални програми за бисouter (m1..m8.mj) стоят в /tmp/opencode; не се комитват.
+- P4 edge-тестове в /tmp/opencode: t4a–t4g (short-circuit, ternary+assign, labeled, for-each,
+  compound), e1–e7 (labeled continue/break do/for, compound на масив елемент+`a[i++]++`, &&-вериги
+  със side-effect, for-each обекти/String/2D, assignment-as-arg, `for(;;)`). Не се комитват.
 - Примерни файлове за multi-D: `examples/md.mj`. OOB multi-D (m7/m8 .mj в /tmp/opencode) → exit 134.
 - Отделни минимални програми за бисouter (m1..m8.mj) стоят в /tmp/opencode; не се комитват.
 - P4 edge-тестове в /tmp/opencode: t4a–t4g (short-circuit, ternary+assign, labeled, for-each,
@@ -394,7 +408,11 @@ regression + docs + commit + push.
   **void: mapType("void")→"void" (обj10)**;
   **P4: labelBreak/labelCont карти, stmt() диспеч по While/Do/For/ForEach/Labeled, helpers
   doWhileStmt/doStmt/forStmt(lbl)/forEachStmt, scAndOr (&&/||), assignVal/Tgt/tgtFor/readTgt/
-  writeTgt (compound += -= *= /= %=), crementVal (++/--), MethodInvocation args-eval bugfix**).
+  writeTgt (compound += -= *= /= %=), crementVal (++/--), MethodInvocation args-eval bugfix**;
+  **import: main `-I/--src` parsing, addUnit/loadClosure/processImports/loadClassFile/loadFromPath/
+  findFile/resolveRefs/onDemandPkgs, walkRefs (reflection, seen-guard), norm() (mapType/irType/
+  elemOf/signatures/locals/cast/instanceof/new/array/try-catch), importedStaticField{,Load,Jt}/
+  importedStaticMethod (read/write/infer), curUnit**).
 - `common/Emitter.java` — spill support (spillTemp/spillBytes/stemp/slotMem/spillLoad/spillStore/
   prepareSpills/saveSpills/maxSpillBytes), x86 ptr→movq, template interpreter + Ctx,
   **`${cargs}` loop-list (base=1), vtables в `.data` (R_AARCH64_RELATIVE → не .rodata),
@@ -413,9 +431,11 @@ regression + docs + commit + push.
   k_println_i32`, `k_newline`, **`k_string_equals`/`k_string_concat`**), mm_alloc, syscalls.
 - `examples/*.mj` — hello, gcd, fib, forloop, dowhile, ternary, switch, print, dbl, lng, mix,
   arrays, oob, str, str2, md, str3, obj, obj2, **obj3**, **obj4**, **obj5**, **obj6**,
-  **obj7**, **obj8**, **obj9**, **obj10**, **cflow**, native.
-- `/tmp/opencode/run_tests.sh` — regression harness (29 теста; беше оправен след corrupt edit:
-  `run_out` без `}`/без `got=$?`, орязани expected-out за dbl/arrays/md).
+  **obj7**, **obj8**, **obj9**, **obj10**, **cflow**, native, **imports/** (imports.mj +
+  geom/Geom.mj + shapes/{Shape,Circle,Square}.mj).
+- `scripts/run_tests.sh` — regression harness (31 теста; бивши `/tmp/opencode/run_tests.sh`
+  беше с corrupt-edit — `run_out` без `}`/без `got=$?`, орязани expected-out за dbl/arrays/md;
+  вече е в repo, self-contained, `TARGET` env (arm64), `--only=<name>`).
 - `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD/SE/**OProbe**/OProbe2/OProbe3/**StProbe**/
   StProbe2/StProbe3/StProbe4/**SupProbe**/SupProbe2/SupProbe3/SupProbe4) — Janino AST probes,
   преизползваеми.
