@@ -39,32 +39,254 @@ public class AstLowerMain {
     }
     int dbgSeq = 1;
 
+    // ─── import support ───────────────────────────────────────────────
+    static final Set<String> BUILTIN_TYPES = new HashSet<>(Arrays.asList("String", "System", "PrintStream", "Object"));
+    List<Path> srcRoots = new ArrayList<>();
+    List<Java.AbstractCompilationUnit> units = new ArrayList<>();
+    Map<Java.AbstractCompilationUnit, Unit> unitOf = new LinkedHashMap<>();
+    Map<String, Unit> unitByClass = new LinkedHashMap<>();
+    Map<String, String> knownSimple = new LinkedHashMap<>();   // simple class name → source path
+    Set<String> loadedPaths = new HashSet<>();
+    Unit curUnit = null;
+
+    static class Unit {
+        Java.AbstractCompilationUnit cu;
+        String path, pkg = "";
+        Map<String, String> singleType = new LinkedHashMap<>();     // simple → dotted
+        List<String> onDemandType = new ArrayList<>();              // packages
+        Map<String, String> singleStatic = new LinkedHashMap<>();   // member → class simple name
+        List<String> onDemandStatic = new ArrayList<>();            // class simple names
+        Set<String> refs = new LinkedHashSet<>();                   // referenced dotted type names
+        boolean importsDone = false;
+    }
+
     public static void main(String[] args) throws Exception {
-        if (args.length < 2) { System.err.println("usage: ast-lower <in.mj> <out.lir>"); System.exit(1); }
-        String src = args[0].equals("-") ? new String(System.in.readAllBytes()) : Files.readString(Path.of(args[0]));
-        String base = args[0].replaceAll(".*/","").replaceAll("\\.(mj|ast)$","");
-        Scanner sc = new Scanner(base + ".mj", new StringReader(src));
-        Java.AbstractCompilationUnit cu = new Parser(sc).parseAbstractCompilationUnit();
+        List<String> roots = new ArrayList<>();
+        String in = null, out = null;
+        for (int i = 0; i < args.length; i++) {
+            String a = args[i];
+            if (a.equals("-I") && i + 1 < args.length) roots.add(args[++i]);
+            else if (a.startsWith("-I")) roots.add(a.substring(2));
+            else if (a.equals("--src") && i + 1 < args.length) roots.addAll(Arrays.asList(args[++i].split(":")));
+            else if (a.startsWith("--src=")) roots.addAll(Arrays.asList(a.substring(6).split(":")));
+            else if (in == null) in = a;
+            else out = a;
+        }
+        if (in == null || out == null) { System.err.println("usage: ast-lower [-I dir]... <in.mj> <out.lir>"); System.exit(1); }
+        String src = in.equals("-") ? new String(System.in.readAllBytes()) : Files.readString(Path.of(in));
+        String base = in.replaceAll(".*/", "").replaceAll("\\.(mj|ast)$", "");
         AstLowerMain m = new AstLowerMain();
         m.prog = new Ir.Program(); m.prog.module = base;
-        List<?> types = (List<?>) get(cu, "packageMemberTypeDeclarations");
-        if (types == null) types = (List<?>) get(cu, "types");
-        if (types != null) for (Object td : types) {
-            if (td instanceof Java.ClassDeclaration cd) m.allDecls.put(getStr(cd, "name"), cd);
+        Java.AbstractCompilationUnit mainCu = parseUnit(src, base + ".mj");
+        if (!in.equals("-")) {
+            Path ap = Path.of(in).toAbsolutePath();
+            if (ap.getParent() != null) m.srcRoots.add(ap.getParent());
+        } else {
+            m.srcRoots.add(Path.of(".").toAbsolutePath());
         }
-        if (types != null) for (Object td : types) {
-            if (td instanceof Java.ClassDeclaration cd) m.collectClass(cd);
-        }
-        if (types != null) for (Object td : types) {
-            if (td instanceof Java.ClassDeclaration cd) m.collectSigs(cd);
-        }
+        for (String r : roots) m.srcRoots.add(Path.of(r).toAbsolutePath());
+        m.addUnit(mainCu, in.equals("-") ? null : Path.of(in).toAbsolutePath().normalize().toString());
+        m.loadClosure();
+
+        List<Object> types = new ArrayList<>();
+        for (Java.AbstractCompilationUnit u : m.units) types.addAll(members(u));
+        for (Object td : types) if (td instanceof Java.ClassDeclaration cd) m.allDecls.put(getStr(cd, "name"), cd);
+        for (Object td : types) if (td instanceof Java.ClassDeclaration cd) m.collectClass(cd);
+        for (Object td : types) if (td instanceof Java.ClassDeclaration cd) m.collectSigs(cd);
         m.buildVtables();
-        if (types != null) for (Object td : types) {
-            if (td instanceof Java.ClassDeclaration cd) m.emitMethods(cd);
-        }
+        for (Object td : types) if (td instanceof Java.ClassDeclaration cd) m.emitMethods(cd);
         m.prog.statics.addAll(m.statics);
-        String out = Ir.Writer.print(m.prog);
-        if (args[1].equals("-")) System.out.print(out); else Files.writeString(Path.of(args[1]), out);
+        String outS = Ir.Writer.print(m.prog);
+        if (out.equals("-")) System.out.print(outS); else Files.writeString(Path.of(out), outS);
+    }
+
+    static Java.AbstractCompilationUnit parseUnit(String src, String fileName) throws Exception {
+        Scanner sc = new Scanner(fileName, new StringReader(src));
+        return new Parser(sc).parseAbstractCompilationUnit();
+    }
+
+    // ─── module/import resolution ─────────────────────────────────────
+    static List<Object> asList(Object o) {
+        List<Object> r = new ArrayList<>();
+        if (o instanceof Object[] a) for (Object x : a) r.add(x);
+        else if (o instanceof List<?> l) r.addAll(l);
+        return r;
+    }
+    static List<Object> members(Java.AbstractCompilationUnit cu) {
+        List<Object> r = asList(get(cu, "packageMemberTypeDeclarations"));
+        if (r.isEmpty()) r = asList(get(cu, "types"));
+        return r;
+    }
+
+    void addUnit(Java.AbstractCompilationUnit cu, String path) {
+        if (path != null) {
+            String ab = Path.of(path).toAbsolutePath().normalize().toString();
+            if (!loadedPaths.add(ab)) return;
+        }
+        Unit u = new Unit();
+        u.cu = cu; u.path = path;
+        Object pd = get(cu, "packageDeclaration");
+        if (pd != null) { Object pn = get(pd, "packageName"); if (pn != null) u.pkg = pn.toString(); }
+        units.add(cu); unitOf.put(cu, u);
+        for (Object td : members(cu)) if (td instanceof Java.ClassDeclaration cd) {
+            String n = getStr(cd, "name");
+            if (n == null) continue;
+            String prev = knownSimple.get(n);
+            if (prev != null && path != null && !prev.equals(path))
+                throw new RuntimeException("duplicate class '" + n + "' in " + prev + " and " + path
+                    + " (flat simple-name namespace: rename one class)");
+            knownSimple.put(n, path == null ? "<stdin>" : path);
+            unitByClass.put(n, u);
+        }
+    }
+
+    void loadClosure() {
+        for (int i = 0; i < units.size(); i++) {
+            Unit u = unitOf.get(units.get(i));
+            processImports(u);
+            collectRefs(u);
+            resolveRefs(u);
+        }
+    }
+
+    void processImports(Unit u) {
+        if (u.importsDone) return;
+        u.importsDone = true;
+        for (Object imp : asList(get(u.cu, "importDeclarations"))) {
+            Object idsO = get(imp, "identifiers");
+            if (!(idsO instanceof String[] ids) || ids.length == 0) continue;
+            String simple = ids[ids.length - 1];
+            String kind = imp.getClass().getSimpleName();
+            if (kind.equals("SingleStaticImportDeclaration")) {
+                String clsDotted = String.join(".", Arrays.copyOf(ids, ids.length - 1));
+                String cls = ids.length >= 2 ? ids[ids.length - 2] : clsDotted;
+                loadClassFile(clsDotted, "import static " + String.join(".", ids));
+                String prev = u.singleStatic.putIfAbsent(simple, cls);
+                if (prev != null && !prev.equals(cls))
+                    throw new RuntimeException("duplicate static import for member '" + simple + "'");
+            } else if (kind.equals("StaticImportOnDemandDeclaration")) {
+                String cls = String.join(".", ids);
+                loadClassFile(cls, "import static " + cls + ".*");
+                if (!u.onDemandStatic.contains(simple)) u.onDemandStatic.add(simple);
+            } else if (kind.equals("SingleTypeImportDeclaration")) {
+                String dotted = String.join(".", ids);
+                loadClassFile(dotted, "import " + dotted);
+                u.singleType.put(simple, dotted);
+            } else if (kind.equals("TypeImportOnDemandDeclaration")) {
+                String pkg = String.join(".", ids);
+                if (!u.onDemandType.contains(pkg)) u.onDemandType.add(pkg);
+            }
+        }
+    }
+
+    void loadClassFile(String dotted, String what) {
+        int dot = dotted.lastIndexOf('.');
+        String simple = dot < 0 ? dotted : dotted.substring(dot + 1);
+        if (simple.isEmpty() || BUILTIN_TYPES.contains(simple)) return;
+        if (knownSimple.containsKey(simple)) return;
+        Path p = findFile(dotted);
+        if (p == null)
+            throw new RuntimeException("cannot resolve `" + what + "`: no file "
+                + dotted.replace('.', '/') + ".mj in source roots " + srcRoots);
+        loadFromPath(p);
+    }
+
+    void loadFromPath(Path p) {
+        String simple = p.getFileName().toString().replaceAll("\\.mj$", "");
+        if (BUILTIN_TYPES.contains(simple) || knownSimple.containsKey(simple)) return;
+        try {
+            addUnit(parseUnit(Files.readString(p), p.getFileName().toString()), p.toString());
+        } catch (RuntimeException re) { throw re; }
+        catch (Exception ex) { throw new RuntimeException("failed to parse " + p + ": " + ex, ex); }
+    }
+
+    Path findFile(String dotted) {
+        String rel = dotted.replace('.', '/') + ".mj";
+        for (Path root : srcRoots) {
+            Path p = root.resolve(rel);
+            if (Files.isRegularFile(p)) return p;
+        }
+        return null;
+    }
+
+    void collectRefs(Unit u) { walkRefs(u.cu, Collections.newSetFromMap(new IdentityHashMap<>()), u.refs); }
+
+    void walkRefs(Object o, Set<Object> seen, Set<String> out) {
+        if (o == null) return;
+        if (o instanceof String || o instanceof Number || o instanceof Boolean
+                || o instanceof Character || o instanceof Class || o.getClass().isEnum()) return;
+        Class<?> c0 = o.getClass();
+        if (c0.isArray()) {
+            if (!seen.add(o)) return;
+            int n = Array.getLength(o);
+            for (int i = 0; i < n; i++) walkRefs(Array.get(o, i), seen, out);
+            return;
+        }
+        if (o instanceof Java.ReferenceType rt) {
+            if (rt.identifiers != null && rt.identifiers.length > 0) out.add(String.join(".", rt.identifiers));
+            return;
+        }
+        if (o instanceof Iterable<?> it) {
+            if (!seen.add(o)) return;
+            for (Object x : it) walkRefs(x, seen, out);
+            return;
+        }
+        if (o instanceof Map<?, ?> mp) {
+            if (!seen.add(o)) return;
+            for (Object x : mp.values()) walkRefs(x, seen, out);
+            return;
+        }
+        if (!seen.add(o)) return;
+        for (Class<?> c = c0; c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                if (Modifier.isStatic(f.getModifiers()) || Modifier.isTransient(f.getModifiers())) continue;
+                try { f.setAccessible(true); walkRefs(f.get(o), seen, out); }
+                catch (Throwable ignore) {}
+            }
+        }
+    }
+
+    void resolveRefs(Unit u) {
+        for (String ref : new ArrayList<>(u.refs)) {
+            int dot = ref.lastIndexOf('.');
+            String simple = dot < 0 ? ref : ref.substring(dot + 1);
+            if (simple.isEmpty() || isPrimitive(simple) || simple.equals("void") || BUILTIN_TYPES.contains(simple)) continue;
+            if (knownSimple.containsKey(simple)) continue;
+            if (dot >= 0) {
+                String dotted = u.singleType.getOrDefault(simple, ref);
+                Path p = findFile(dotted);
+                if (p != null) loadFromPath(p);
+                continue;
+            }
+            if (u.singleType.containsKey(simple)) {
+                Path p = findFile(u.singleType.get(simple));
+                if (p != null) { loadFromPath(p); continue; }
+            }
+            List<Path> hits = new ArrayList<>();
+            for (String pkg : onDemandPkgs(u)) {
+                Path p = findFile(pkg.isEmpty() ? simple : pkg + "." + simple);
+                if (p != null && !hits.contains(p)) hits.add(p);
+            }
+            if (hits.size() > 1)
+                throw new RuntimeException("ambiguous reference '" + simple + "' (found in " + hits + "); add an explicit import");
+            if (hits.size() == 1) loadFromPath(hits.get(0));
+        }
+    }
+
+    List<String> onDemandPkgs(Unit u) {
+        List<String> l = new ArrayList<>();
+        if (!u.pkg.isEmpty()) l.add(u.pkg);
+        l.add("java.lang");
+        l.addAll(u.onDemandType);
+        return l;
+    }
+
+    static boolean isPrimitive(String t) {
+        switch (t) {
+            case "int": case "boolean": case "byte": case "short":
+            case "char": case "long": case "double": case "float": return true;
+            default: return false;
+        }
     }
 
     // ─── reflection helper ───
@@ -97,7 +319,21 @@ public class AstLowerMain {
     Ir.Value blockRef(Ir.Block b) { Ir.Value v = new Ir.Value("block","ptr"); v.imm=b.hashCode(); v.name=b.name; return v; }
 
     // ─── type mapping (MiniJ scalar types → IR) ─────────────────────────────
+    /** Нормализира Java-тип от AST: маха пакетен префикс, запазва "[]"-суфикси.
+     *  Дотук компилаторът работи само с прости имена; това е мястото, където
+     *  това ограничение се прилага експлицитно (fq типове се свеждат до просто име). */
+    static String norm(String jt) {
+        if (jt == null || jt.isEmpty()) return jt;
+        StringBuilder suf = new StringBuilder();
+        String b = jt;
+        while (b.endsWith("[]")) { suf.append("[]"); b = b.substring(0, b.length() - 2); }
+        int dot = b.lastIndexOf('.');
+        if (dot >= 0) b = b.substring(dot + 1);
+        return b + suf;
+    }
+
     static String mapType(String jt) {
+        jt = norm(jt);
         if (jt == null) return "i32";
         if (jt.endsWith("[]")) return "ptr";
         switch (jt) {
@@ -112,6 +348,7 @@ public class AstLowerMain {
     }
     /** Java тип на обект-клас → IR ptr; останалото − по mapType. */
     String irType(String jt) {
+        jt = norm(jt);
         if (jt != null && classIndex.containsKey(jt)) return "ptr";
         return mapType(jt);
     }
@@ -148,7 +385,7 @@ public class AstLowerMain {
         Object members = invoke0(cd, "getVariableDeclaratorsAndInitializers");
         if (members instanceof List<?> ml) for (Object mb : ml) {
             if (!(mb instanceof Java.FieldDeclarationOrInitializer)) continue;
-            String jt = getStr(mb, "type");
+            String jt = norm(getStr(mb, "type"));
             if (jt == null) continue;
             String ft = irType(jt);
             boolean isStatic = mb instanceof Java.FieldDeclaration fd && fd.isStatic();
@@ -188,6 +425,7 @@ public class AstLowerMain {
     /** Елементен тип на 1-D примитивен масив от Java-типа "int[]"/"long[]"/"double[]".
      *  Многомерен ("int[][]", "int[][][]", …) и "String[]" дават "ptr" (клетките пазят указатели). */
     String elemOf(String jt) {
+        jt = norm(jt);
         if (jt == null || !jt.endsWith("[]")) return null;
         String c = jt.substring(0, jt.length() - 2);
         if (c.endsWith("[]") || c.equals("String") || classIndex.containsKey(c)) return "ptr";
@@ -206,7 +444,9 @@ public class AstLowerMain {
         if (e instanceof Java.ParenthesizedExpression pe) return javaTypeOf((Java.Rvalue) pe.value);
         if (e instanceof Java.AmbiguousName an) {
             if (an.identifiers.length > 1 && an.identifiers[1].equals("length")) return "int";  // x.length
-            String t = varJType.get(an.identifiers[0]); return t == null ? "int" : t;
+            String t = varJType.get(an.identifiers[0]);
+            if (t == null && an.identifiers.length == 1) t = importedStaticFieldJt(an.identifiers[0]);
+            return t == null ? "int" : t;
         }
         if (e instanceof Java.ArrayAccessExpression aa) {
             String b = javaTypeOf(aa.lhs);
@@ -214,9 +454,9 @@ public class AstLowerMain {
         }
         if (e instanceof Java.NewClassInstance nci) {
             Object t = get(nci, "type");
-            return t == null ? "int" : t.toString();
+            return t == null ? "int" : norm(t.toString());
         }
-        if (e instanceof Java.Cast c) { String t = getStr(c, "targetType"); return t == null ? "int" : t; }
+        if (e instanceof Java.Cast c) { String t = norm(getStr(c, "targetType")); return t == null ? "int" : t; }
         if (e instanceof Java.Instanceof) return "boolean";
         if (e instanceof Java.BooleanLiteral) return "boolean";
         if (e instanceof Java.NullLiteral) return "null";
@@ -338,6 +578,10 @@ public class AstLowerMain {
                 if (sf != null) return m.irType((String) sf[2]);
             }
             String s = m.varType.get(an.identifiers[0]);
+            if (s == null && an.identifiers.length == 1) {
+                String sjt = m.importedStaticFieldJt(an.identifiers[0]);
+                if (sjt != null) return m.irType(sjt);
+            }
             return s == null ? "i32" : s;
         }
         if (e instanceof Java.ArrayAccessExpression aa) {
@@ -370,7 +614,7 @@ public class AstLowerMain {
         if (cn == null) cn = "T";
         for (Object mo : methods) {
             if (!(mo instanceof Java.MethodDeclarator md)) continue;
-            String jt = getStr(md, "type");
+            String jt = norm(getStr(md, "type"));
             methodRet.put(md.name, irType(jt));
             methodRetJt.put(md.name, jt);
             if (md.isNative()) {
@@ -395,6 +639,7 @@ public class AstLowerMain {
         List<?> cstrs = getList(cd, "constructors");
         String cn = getStr(cd, "name");
         if (cn == null) cn = "T";
+        curUnit = unitByClass.get(cn);
         for (Object mo : methods) {
             if (!(mo instanceof Java.MethodDeclarator m)) continue;
             if (m.isNative()) continue;
@@ -411,14 +656,14 @@ public class AstLowerMain {
         MethSig s = new MethSig();
         s.cn = cn; s.name = name;
         s.isStatic = fd instanceof Java.MethodDeclarator md && methodStatic(md);
-        s.retIr = irType(getStr(fd, "type")); s.retJt = getStr(fd, "type");
+        s.retIr = irType(getStr(fd, "type")); s.retJt = norm(getStr(fd, "type"));
         int ar = fd.formalParameters != null && fd.formalParameters.parameters != null
                 ? fd.formalParameters.parameters.length : 0;
         s.pjts = new String[ar]; s.pirs = new String[ar];
         for (int i = 0; i < ar; i++) {
             Object fp = fd.formalParameters.parameters[i];
             if (fp instanceof Java.FunctionDeclarator.FormalParameter f) {
-                s.pjts[i] = getStr(f, "type");
+                s.pjts[i] = norm(getStr(f, "type"));
                 s.pirs[i] = irType(s.pjts[i]);
             }
         }
@@ -456,7 +701,7 @@ public class AstLowerMain {
                 boolean ok = true;
                 for (int i = 0; i < ar; i++) {
                     Object fp = m.formalParameters.parameters[i];
-                    String fj = fp instanceof Java.FunctionDeclarator.FormalParameter f ? getStr(f, "type") : null;
+                    String fj = fp instanceof Java.FunctionDeclarator.FormalParameter f ? norm(getStr(f, "type")) : null;
                     if (fj == null || !fj.equals(s.pjts[i])) { ok = false; break; }
                 }
                 if (ok) { sig = s; break; }
@@ -480,7 +725,7 @@ public class AstLowerMain {
         for (Object p : m.formalParameters.parameters) {
             if (!(p instanceof Java.FunctionDeclarator.FormalParameter fp)) continue;
             String pt = irType(getStr(fp, "type"));
-            varJType.put(fp.name, getStr(fp, "type"));
+            varJType.put(fp.name, norm(getStr(fp, "type")));
             f.params.add(new String[]{fp.name, pt});
         }
         Ir.Block e = new Ir.Block("entry"); cur = e; f.blocks.add(e);
@@ -565,7 +810,7 @@ public class AstLowerMain {
     void stmt(Java.BlockStatement s) {
         if (s instanceof Java.LocalVariableDeclarationStatement d) {
             for (Java.VariableDeclarator vd : d.variableDeclarators) {
-                String jt = getStr(d, "type");
+                String jt = norm(getStr(d, "type"));
                 String dt = irType(jt);
                 varJType.put(vd.name, jt);
                 Ir.Value a = emit("alloca", dt); a.dbg = tag(s);
@@ -795,7 +1040,7 @@ public class AstLowerMain {
                 Object cbo = get(cf, "body");
                 if (ptypes != null) {
                     for (Java.Type pt : ptypes) {
-                        cty = pt.toString();
+                        cty = norm(pt.toString());
                         for (Integer k : subtypeIndexes(cty)) if (!kinds.contains(String.valueOf(k))) kinds.add(String.valueOf(k));
                     }
                     pn = cf.catchParameter.name;
@@ -921,7 +1166,7 @@ public class AstLowerMain {
         int id = dbgSeq++;
         Object fpo = get(fe, "currentElement");
         String elName = fpo == null ? null : getStr(fpo, "name");
-        String elJt = fpo == null ? null : getStr(fpo, "type");
+        String elJt = fpo == null ? null : norm(getStr(fpo, "type"));
         Object expO = get(fe, "expression");
         Ir.Value arr = expO instanceof Java.Rvalue rv ? expr(rv) : konst(0, "ptr", -1);
         String cjt = javaTypeOf((Java.Rvalue) expO);
@@ -989,6 +1234,8 @@ public class AstLowerMain {
             if (al != null) return new Tgt(al, varType.getOrDefault(name, al.type), true);
             FieldAddr ft = fieldThis(name);
             if (ft != null) return new Tgt(ft.addr, ft.ir, false);
+            Object[] sf = importedStaticField(name);
+            if (sf != null) return new Tgt(staticAddr(sf, tag(lhs)), (String) sf[0], false);
             System.err.println("# undefined: " + name);
             return new Tgt(konst(0, "ptr", -1), "i32", false);
         }
@@ -1137,6 +1384,44 @@ public class AstLowerMain {
         return f;
     }
 
+    /** Резолвиране на голо име през `import static K.f;` → статично поле на K. */
+    Object[] importedStaticField(String name) {
+        if (curUnit == null) return null;
+        String cls = curUnit.singleStatic.get(name);
+        if (cls == null) return null;
+        Object[] f = staticField(cls, name);
+        if (f == null)
+            throw new RuntimeException("import static " + cls + "." + name + ": no such static field");
+        return f;
+    }
+    Ir.Value importedStaticFieldLoad(String name) {
+        Object[] f = importedStaticField(name);
+        if (f == null) return null;
+        FieldAddr fa = staticAddrField(f, -1);
+        Ir.Value l = emit("ld_" + fa.ir, fa.ir, fa.addr); l.dbg = -1;
+        return l;
+    }
+    String importedStaticFieldJt(String name) {
+        Object[] f = importedStaticField(name);
+        return f == null ? null : (String) f[2];
+    }
+    /** Резолвиране на голо извикване през `import static K.m;` / `import static K.*;`. */
+    List<MethSig> importedStaticMethod(String simpleCls, String name) {
+        if (curUnit == null) return null;
+        String cls = curUnit.singleStatic.get(simpleCls);
+        if (cls != null) {
+            List<MethSig> ls = lookupMethod(cls, name);
+            if (ls == null || ls.isEmpty())
+                throw new RuntimeException("import static " + cls + "." + name + ": no such static method");
+            return ls;
+        }
+        for (String c : curUnit.onDemandStatic) {
+            List<MethSig> ls = lookupMethod(c, name);
+            if (ls != null && !ls.isEmpty()) return ls;
+        }
+        return null;
+    }
+
     /** Явен `super.m(args…)` в instance метод → ДИРЕКТЕН call на super-символа (без vtable:
      *  super винаги обхожда статичния super-тип, дори ако потомък го override-ва). */
     Ir.Value superCall(Object e, int dbg) {
@@ -1243,6 +1528,10 @@ public class AstLowerMain {
                 && classIndex.containsKey(ta.identifiers[0])) {
             staticCall[0] = true;
             return lookupMethod(ta.identifiers[0], mi.methodName);
+        }
+        if (tgt instanceof Java.AmbiguousName ta && ta.identifiers.length == 1) {
+            List<MethSig> ls = importedStaticMethod(ta.identifiers[0], mi.methodName);
+            if (ls != null && !ls.isEmpty()) { staticCall[0] = true; return ls; }
         }
         staticCall[0] = false;
         String rj = javaTypeOf(tgt);
@@ -1520,11 +1809,13 @@ if (e == null) return konst(0, "i32", -1);
             if (al != null) { Ir.Value l = emit("load", al.type, al); l.dbg = tag(e); return l; }
             FieldAddr ft = fieldThis(n);
             if (ft != null) { Ir.Value l = emit("ld_" + ft.ir, ft.ir, ft.addr); l.dbg = tag(e); return l; }
+            Ir.Value sf = importedStaticFieldLoad(n);
+            if (sf != null) return sf;
             throw new RuntimeException("undefined: " + n);
         }
         if (e instanceof Java.NewClassInstance nci) {
             Object t = get(nci, "type");
-            String cn = t == null ? null : t.toString();
+            String cn = t == null ? null : norm(t.toString());
             if (cn != null && classIndex.containsKey(cn)) {
                 Object argsO = get(nci, "arguments");
                 int na = argsO instanceof Object[] o ? o.length : 0;
@@ -1557,7 +1848,7 @@ if (e == null) return konst(0, "i32", -1);
             Java.Rvalue[] dims = de instanceof Java.Rvalue[] ? (Java.Rvalue[]) de : null;
             int nd = dims == null ? 0 : dims.length;
             int trailing = get(na, "dims") instanceof Integer i ? i : 0;
-            String base = getStr(na, "type");
+            String base = norm(getStr(na, "type"));
             int total = nd + trailing;
             if (nd == 1) {
                 String el = elemOfAccess(base + "[]".repeat(total));
@@ -1613,7 +1904,7 @@ if (e == null) return konst(0, "i32", -1);
             if (u.operator.equals("!")) { Ir.Value v = emit("cmpeq","i32",a,konst(0,"i32",tag(u))); v.dbg=tag(u); return v; }
         }
         if (e instanceof Java.Instanceof io) {
-            String tc = getStr(io, "rhs");
+            String tc = norm(getStr(io, "rhs"));
             if (!classIndex.containsKey(tc))
                 throw new RuntimeException("instanceof on unsupported type: " + tc);
             int id = dbgSeq++;
@@ -1635,7 +1926,7 @@ if (e == null) return konst(0, "i32", -1);
             return r;
         }
         if (e instanceof Java.Cast c) {
-            String tc = getStr(c, "targetType");
+            String tc = norm(getStr(c, "targetType"));
             if (classIndex.containsKey(tc)) {
                 Ir.Value v = expr((Java.Rvalue) get(c, "value"));
                 int id = dbgSeq++;

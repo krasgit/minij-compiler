@@ -1,0 +1,9 @@
+package geom;
+
+class Geom {
+    static int UNIT;
+    static int two(int x) { return x + x; }
+    static int scale(int x) { return x * UNIT; }
+    static int area(int w, int h) { return w * h; }
+    static void setUnit(int u) { UNIT = u; }
+}

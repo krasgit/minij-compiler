@@ -1,0 +1,6 @@
+package shapes;
+
+class Circle extends Shape {
+    Circle(int r) { super(r); }
+    int area() { return 3 * this.w * this.w; }
+}

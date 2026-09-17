@@ -1,0 +1,21 @@
+import geom.Geom;
+import static geom.Geom.UNIT;
+import static geom.Geom.two;
+import static geom.Geom.*;
+import shapes.*;
+import java.lang.String;
+
+class Billing {
+    static int main() {
+        Circle c = new Circle(2);
+        Square s = new Square(3);
+        puti(c.area());
+        puti(s.area());
+        setUnit(4);
+        puti(UNIT);
+        puti(two(5));
+        puti(scale(10));
+        puti(Geom.area(3, 4));
+        return 0;
+    }
+}

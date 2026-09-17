@@ -9,6 +9,7 @@ while [ $# -gt 0 ]; do
         --stage=*)  STAGE="${1#*=}" ;;
         --keep)     KEEP=1 ;;
         -o)         shift; OUT="$1" ;;
+        -I)         shift; IMPORTS="$IMPORTS -I $1" ;;
         *)          if [ -z "$SRC" ]; then SRC="$1"; fi ;;
     esac
     shift
@@ -19,7 +20,7 @@ BASE=$(basename "$SRC" .mj)
 janino-parse "$SRC" "$BASE.ast"
 [ "$STAGE" = "ast" ] && { cat "$BASE.ast"; exit 0; }
 
-ast-lower "$SRC" "$BASE.lir"
+ast-lower $IMPORTS "$SRC" "$BASE.lir"
 [ "$STAGE" = "lir" ] && { cat "$BASE.lir"; exit 0; }
 
 ssa-build "$BASE.lir" "$BASE.ssa"
@@ -66,7 +67,7 @@ else
 fi
 "$CC" -c "$CRT0" -o "$BASE.crt0.o" 2>/dev/null \
     || as "$CRT0" -o "$BASE.crt0.o"
-"$CC" -nostartfiles "$BASE.o" "$BASE.crt0.o" "$BASE.runtime.o" -lc -o "$OUT"
+"$CC" -no-pie -nostartfiles "$BASE.o" "$BASE.crt0.o" "$BASE.runtime.o" -lc -o "$OUT"
 
 if [ "$KEEP" = "0" ]; then
     rm -f "$BASE.ast" "$BASE.lir" "$BASE.ssa" "$BASE.opt.ssa" "$BASE.mir" "$BASE.alloc.mir" "$BASE.final.mir" "$BASE.s" "$BASE.o" "$BASE.runtime.o" "$BASE.crt0.o"

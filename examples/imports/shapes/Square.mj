@@ -1,0 +1,5 @@
+package shapes;
+
+class Square extends Shape {
+    Square(int side) { super(side); }
+}
