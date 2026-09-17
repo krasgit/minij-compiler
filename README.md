@@ -93,7 +93,7 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 `/shared/compiler` е на noexec mount — `./bin/*` и `test.sh` (който вика `./build.sh`)
 не работят на място. Регресията се гони от `/tmp/opencode/run_tests.sh`
-(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **29/29 теста на arm64**
+(директни `java -cp` повиквания + `as`/`ld`/`gcc` в /tmp): **30/30 теста на arm64**
 (47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
@@ -109,7 +109,8 @@ obj8 `3/8/10/6/96/996/11/102/15/15`, exit 42 (P3 super.method/field),
 obj9 `28/11/1/15/25/5/5/4`, exit 42 (P3 масив от обекти),
 obj10 `1/2/3/1/2/42`, exit 0 (P3 void методи + `static void main`);
 cflow `30/2/23/23/22/40/24/33/8/103/3`, exit 0 (P4 control flow — short-circuit, compound, `++/--`,
-labeled loops, enhanced-for, assignment-as-expression); всеки — exit code + stdout чек).
+labeled loops, enhanced-for, assignment-as-expression);
+exc `10/110/111/7/114/118/518/50`, exit 3 (P5 exceptions); всеки — exit code + stdout чек).
 
 ### String / char (P2)
 
@@ -316,12 +317,47 @@ Java-семантиката на изразите и циклите вече е 
 и `--`, labeled `break outer`/`continue`, enhanced-for над `int[]` и `Card[]`, assignment-as-arg,
 compound на масив елемент) → `30/2/23/23/22/40/24/33/8/103/3`, exit 0.
 
+### Изключения (P5) — `try/catch/finally` + `throw`
+
+`throw`, `try`/`catch`/`finally` и runtime unwinding работят end-to-end. IR-ниво:
+
+- Нови ops: **`EH_LAB`** (`%N = EH_LAB <id>` — носи именато като 0-арг call: arm64
+  `adrp x9, .L…_dsp_<id>`/`add $dst, x9, :lo12:…`, x86 `leaq …(%rip)`), **`FP`** (`mov $dst, x29` /
+  `movq %rbp`), **`EH_EXC`** (`mov $dst, x0` / `movq %rdi`).
+- Нов func metadata, сериализиран между `.param` и тялото: `.ehvar <name>…` (alloca имена, които
+  SSA не трябва да промотира — регистрират се директно в слота), `.ehcatch <id> <handlerBlock>
+  <kindsCsv>`, `.ehfin <id> <finBlock>`, `.ehsrc <predBlock> <handlerBlock>` (синтетични
+  dominance/reachability ребра от всяка потенциална точка на хвърляне до handler-а).
+- Emitter строи за всеки func с `.ehcatch`/`.ehfin` **dispatcher** `.L<fn>_dsp_<id>` в края:
+  чете `rec->handler`-кода от exception-а (`ldr w9, [x0]` — exception обектът е арг 0), сравнява с
+  поредните `kindsCsv` стойности (`b.eq` към match-блок), при несъвпадение минава на следващия
+  catch или на finally/`ret 0`. **Match-блокът прави restore преди да скочи в handler-а**
+  (`pop exc_head`, `mov x29, rec->fp`, `sub sp, x29, #frame`) — без това един stale `rec` на
+  chain-а пре-хващаше предхвърлено в тялото изключение в безкраен цикъл.
+- Try-entry-то е `k_exc_push(dsp_label, fp)` (връща `rec`, който нормалният път `k_exc_pop`-ва),
+  всяко `throw` call-ва `k_throw(e)` и слага недостижим `return`.
+
+Frontend (AstLower): `Deque<ExcGuard>` пази активните try-та; `unwindGuards(terminated)` се вика от
+`return` (първо се оцени стойността), `break`/`continue` — пуска не-pop-натите rec-и и изпълнява
+finally блоковете в обратен ред преди изхода. `finally` се изпълнява по 3 пътя: нормален falloff,
+при catch, и при пренасочване от dispatcher (`ehf` блок re-throw-ва). Статусът на една `finally`
+се пази в `Exception` temp (EH_EXC), който се `k_throw`-ва ако дойде от unwinding.
+
+Runtime (`runtime.c`): `ExcRec{prev, fp, handler}` в статичен `exc_pool[128]` (най-дълбок вложен
+rec → exit 77), глобален `exc_head`. `k_throw(e)` минава по chain-а търсейки handler, който върне
+не-0 (catch-нал) — иначе печата `#<classIndex>` и `sys_exit(3)` (необработено изключение).
+Exception обектите са обичайните MiniJ обекти от MM arena (vtable + fields).
+
+Пример `examples/exc.mj` (две нива try/catch/finally, re-throw, `finally` и при трите пътя,
+SubException/`getMessage`, необработено в крайна сметка) → `10/110/111/7/114/118/518/50`, exit 3
+(uncaught). x86 backend също emit-ва (текстуално) — регресията върви само на arm64.
+
 ## Пътна карта
 
 Пълен план P0–P8: [docs/ROADMAP.md](docs/ROADMAP.md).
 Core lib договор (API-огледало на java.base): [docs/corelib.md](docs/corelib.md).
 
-Кратко: P0 (инфраструктура/`.rule v2`) → P1 (типове) → P2 (памет/масиви/String) → P3 (обекти/header) → P3.5 (GC) → ~~P4 (контрол — done)~~ → P5 (exceptions) → P6 (core lib) → P7 (threads/concurrency) → P8 (модерен Java).
+Кратко: P0 (инфраструктура/`.rule v2`) → P1 (типове) → P2 (памет/масиви/String) → P3 (обекти/header) → P3.5 (GC) → ~~P4 (контрол — done)~~ → ~~P5 (exceptions — done)~~ → P6 (core lib) → P7 (threads/concurrency) → P8 (модерен Java).
 
 ## Структура
 

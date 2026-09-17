@@ -218,10 +218,22 @@
   `++`/`--` pre/post, assignment-as-expression (`(x = e)`, като аргумент).
 - ✅ Latent bugfix: bare-name MethodInvocation оценяваше args два пъти.
 
-## P5 — Exceptions
-- `throw`, `try/catch/finally`, runtime unwinding (frame таблици от компилатора).
-- `Exception` + subclasses (съобщение), `finally` реализация.
-- `NumberFormatException`, `IllegalArgument`, `NullPointerException`, `ArrayIndexOutOfBoundsException` за core lib.
+## P5 — Exceptions ✅ (done, exc; 30/30)
+- ✅ `throw`, `try/catch/finally`, runtime unwinding. Нови ops `EH_LAB`/`FP`/`EH_EXC`
+  (rules: arm64 + x86), func `.ehvar/.ehcatch/.ehfin/.ehsrc` metadata (Ir Writer/Reader).
+- ✅ Dispatcher per try-ид в края на функцията: match-блоковете възстановяват кадъра
+  (`pop exc_head`, `mov x29, rec->fp`, `sub sp, x29, #frame`) **преди** skok-а към
+  catch/finally — иначе stale `rec` на chain-а дава безкраен re-catch.
+- ✅ Runtime: `ExcRec{prev,fp,handler}` в static pool (дълбочина 128 → exit 77), `exc_head`;
+  `k_throw` = chain walk (handler → не-0) иначе `#<classIndex>` + `sys_exit(3)`.
+- ✅ Frontend: `Deque<ExcGuard>`, `unwindGuards()` (return-стойността се оценява първо,
+  после pop + finally в обратен ред), break/continue unwind, finally по 3-те пътя,
+  `ehf` re-throw през EH_EXC temp.
+- ✅ SSA не промотира `.ehvar` alloca-и; Dominance добавя синтетични `.ehsrc` ребра.
+- Пример `examples/exc.mj` → `10/110/111/7/114/118/518/50`, exit 3 (uncaught);
+  регресия **30/30 (arm64)**, x86 textual emit OK.
+- Останало в P5 (core lib изключения): `NumberFormatException`, `IllegalArgument`,
+  `NullPointerException`, `ArrayIndexOutOfBoundsException` — с P6 core library.
 
 ## P6 — MiniJ core library (API-огледало на `java.base`)
 - **`java.lang`**: System, PrintStream, Object, String, Integer, Long, Math (native→libm).

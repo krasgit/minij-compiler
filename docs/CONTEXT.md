@@ -53,8 +53,9 @@ regression + docs + commit + push.
   → **`5a17f16` P3 static полета (обj7)`.** → **P3 явен super.method/field (обj8, HEAD)**
   → **`1ac9d83` P3 `Foo[]` масиви от обекти (обj9; 27/27)** → **`ee95a94` P3 `void` методи +
   `static void main` (обj10; 28/28)** → **`be8233d` P4 control flow (cflow; 29/29)**
+  → **`87212e8` P5 exceptions (exc; 30/30)**
 
-## Status (актуално към HEAD = be8233d, регресия 29/29)
+## Status (актуално към HEAD = 87212e8, регресия 30/30)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
@@ -72,9 +73,14 @@ regression + docs + commit + push.
   arm rule `return()` с `mov x0,#0`)**;
   **P4-Control (29/29 — cflow.mj): short-circuit `&&`/`||`, compound `+= -= *= /= %=`, `++`/`--`
   pre/post, assignment-as-expression, labeled break/continue, enhanced-for, `for(;;)`, латентен
-  bugfix bare-name MethodInvocation double-arg-eval**.
-- ACTIVE: P4-Control е **завършен**. Следва решение P3.5 GC vs P5 (виж NEXT MOVE).
-- Regression: **29/29 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+  bugfix bare-name MethodInvocation double-arg-eval**;
+  **P5-Exceptions (30/30 — exc.mj): `throw`/`try`/`catch`/`finally` + runtime unwinding —
+  ops `EH_LAB`/`FP`/`EH_EXC`, func `.ehvar/.ehcatch/.ehfin/.ehsrc` metadata, per-try dispatcher
+  с restore **преди** match-та (иначе stale `exc_head` re-catch в безкраен цикъл), `ExcRec` pool
+  + `exc_head`, `k_throw` chain-walk → uncaught `#<classIndex>` exit 3, frontend
+  `ExcGuard`/`unwindGuards()` за return/break/continue + finally по 3-те пътя + `ehf` re-throw**.
+- ACTIVE: P5 е **завършен** (30/30). Следва P3.5 GC или P6 core lib (виж NEXT MOVE).
+- Regression: **30/30 PASS на arm64** (run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
   str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
   **obj** (`5/7/6/12`, `1/2/3/1`, exit 2),
@@ -87,19 +93,22 @@ regression + docs + commit + push.
   **obj8** (`3/8/10/6/96/996/11/102/15/15`, exit 42),
   **obj9** (`28/11/1/15/25/5/5/4`, exit 42),
   **obj10** (`1/2/3/1/2/42`, exit 0),
-  **cflow** (`30/2/23/23/22/40/24/33/8/103/3`, exit 0).
+  **cflow** (`30/2/23/23/22/40/24/33/8/103/3`, exit 0),
+  **exc** (`10/110/111/7/114/118/518/50`, exit 3 — uncaught).
 
 ## NEXT MOVE (при "continue")
 
-**P4-Control e завършен** (cflow; 29/29) → следва избор между:
+**P5-Exceptions е завършен** (exc.mj; 30/30) → следва избор между:
 1. **P3.5 GC решение** — паметта е arena/без free-ване от P0; GC (mark-sweep по vtables/header
-   seam от P3) е големият риск за P5+ (exceptions не произвеждат контейнери, но P7 threads ще
-   искат). Решение: (A) ръчен conservative mark&sweep по stack scan или (B) MMTk binding.
+   seam от P3) е големият риск за P6+ (core lib обекти/контейнери, P7 threads).
+   Решение: (A) ръчен conservative mark&sweep по stack scan или (B) MMTk binding.
    Seam-ът (header class index + pad, `mm_alloc`) е готов от P3.
-2. **P5 Exceptions** — `throw`, `try/catch/finally`, frame-таблица за unwinding, Exception класове.
+2. **P6 MiniJ core library** — java.lang (System/PrintStream/Object/String/Integer/Long/Math),
+   java.util (Arrays/Random), `corelib/` .mj + `natives.c` + `docs/corelib.md`; включва core
+   Exception klасове (NumberFormat/IllegalArgument/NullPointer/ArrayIndexOutOfBounds) за P5.
 
 Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `run_tests.sh`
-(29/29→N/N) → README/ROADMAP/CONTEXT → комит+push.
+(30/30→N/N) → README/ROADMAP/CONTEXT → комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
 
