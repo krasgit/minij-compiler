@@ -1,0 +1,5 @@
+// P6: java.lang.ArrayIndexOutOfBoundsException extends RuntimeException.
+
+class ArrayIndexOutOfBoundsException extends RuntimeException {
+    ArrayIndexOutOfBoundsException(String m) { super(m); }
+}

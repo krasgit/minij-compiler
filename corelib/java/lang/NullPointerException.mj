@@ -1,0 +1,5 @@
+// P6: java.lang.NullPointerException extends RuntimeException.
+
+class NullPointerException extends RuntimeException {
+    NullPointerException(String m) { super(m); }
+}

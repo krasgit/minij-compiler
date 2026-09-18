@@ -1,0 +1,5 @@
+// P6: java.lang.IllegalArgumentException extends RuntimeException.
+
+class IllegalArgumentException extends RuntimeException {
+    IllegalArgumentException(String m) { super(m); }
+}

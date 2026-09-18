@@ -1,55 +1,52 @@
-// requires: P1 (long, 1L/0x…L, SHR/USHR), P3 (objects, instanceof), P5 (NumberFormatException)
-package java.lang;
+// P6: java.lang.Long — MiniJ corelib (long-подмножество; без битови ops —
+// P1 tail gap). Overspill-ът при parseInt/parseLong се guard-ва като Integer.
 
-public class Long {
-    public static final long MIN_VALUE = -9223372036854775808L;
-    public static final long MAX_VALUE = 9223372036854775807L;
+class Long {
+    static long MAX_VALUE = 9223372036854775807L;
 
-    private long value;
-
-    public Long(long v) { value = v; }
-
-    public long longValue() { return value; }
-
-    public boolean equals(Object o) {
-        return o instanceof Long && ((Long) o).value == value;
-    }
-
-    public int hashCode() { return (int) (value ^ (value >>> 32)); }
-
-    public String toString() { return toString(value); }
-
-    public static Long valueOf(long v) { return new Long(v); }
-
-    public static String toString(long v) {
-        if (v == 0) return "0";
-        boolean neg = v < 0;
-        char[] buf = new char[20];
-        int i = 20;
-        long u = v;
-        while (u != 0) {
-            long m = u % 10;
-            buf[--i] = (char) ('0' - m);
-            u = u / 10;
-        }
-        if (neg) buf[--i] = '-';
-        return String.wrap(buf, 20 - i);
-    }
-
-    public static long parseLong(String s) {
-        // TODO(P5): throw NumberFormatException при невалиден вход
-        if (s == null || s.length() == 0) return 0;
+    static long parseLong(String s) {
         int i = 0;
-        boolean neg = false;
-        char c = s.charAt(0);
-        if (c == '-' || c == '+') { neg = c == '-'; i = 1; }
+        int n = s.length;
+        if (i < n && s[i] == '-') i = i + 1;
         long v = 0;
-        for (; i < s.length(); i++) {
-            int d = s.charAt(i) - '0';
-            if (d < 0 || d > 9) break;
-            v = v * 10 + d;
+        boolean any = false;
+        while (i < n) {
+            int c = s[i];
+            if (c < 48 || c > 57) throw new NumberFormatException("invalid numeric input");
+            if (v > ((Long.MAX_VALUE - (c - 48)) / 10)) throw new NumberFormatException("overflow");
+            v = v * 10 + (c - 48);
+            any = true;
+            i = i + 1;
         }
-        if (neg) v = -v;
+        if (!any) throw new NumberFormatException("empty input");
+        if (s[0] == '-') return -v;
         return v;
+    }
+
+    static String toString(long x) {
+        if (x == 0) return "0";
+        boolean neg = x < 0;
+        long v = x;
+        if (neg) v = -v;
+        char[] t = new char[20];
+        int i = 20;
+        while (v > 0) {
+            i = i - 1;
+            t[i] = (char) (48 + (v % 10));
+            v = v / 10;
+        }
+        if (neg) {
+            i = i - 1;
+            t[i] = '-';
+        }
+        int n = 20 - i;
+        char[] r = new char[n];
+        int k = 0;
+        while (i < 20) {
+            r[k] = t[i];
+            k = k + 1;
+            i = i + 1;
+        }
+        return r;
     }
 }

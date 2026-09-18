@@ -71,8 +71,8 @@ public class Regalloc {
 
         // ── linear scan, one pass per pool, shared stack-slot counter ───────
         int[] slotRef = new int[1];
-        linscan(pool(order, false), intRegs, takenInt, dbg, slotRef, false, vblock, loop, bIdx);
-        if (haveFp) linscan(pool(order, true), fpRegs, takenFp, dbg, slotRef, true, vblock, loop, bIdx);
+        linscan(f, pool(order, false), intRegs, takenInt, dbg, slotRef, false, vblock, loop, bIdx);
+        if (haveFp) linscan(f, pool(order, true), fpRegs, takenFp, dbg, slotRef, true, vblock, loop, bIdx);
     }
 
     static String targ(Ir.Value v) { return v.name != null ? v.name : "B" + v.imm; }
@@ -128,15 +128,30 @@ public class Regalloc {
     }
 
     // linear scan for a single pool; writes assignments into dbg.locations
-    static void linscan(List<Ir.Value> items, String[] pool, LinkedHashSet<String> taken,
+    static void linscan(Ir.Func f, List<Ir.Value> items, String[] pool, LinkedHashSet<String> taken,
                         Ir.DebugInfo dbg, int[] slotRef, boolean fpPass,
                         Map<Ir.Value,String> vblock, Map<String,int[]> loop, Map<String,Integer> bIdx) {
         String pref = fpPass ? "freg " : "reg ";
         Map<Ir.Value,Integer> last = new HashMap<>();
         Map<Integer,Integer> endIdx = new HashMap<>();
+        int[] prefixEnd = new int[f.blocks.size()];
+        int running = -1;
         for (int i = 0; i < items.size(); i++) {
             Integer bi = bIdx.get(vblock.get(items.get(i)));
             if (bi != null) endIdx.put(bi, i);
+        }
+        for (int bi = 0; bi < f.blocks.size(); bi++) { running = Math.max(running, endIdx.getOrDefault(bi, -1)); prefixEnd[bi] = running; }
+        Map<String,Integer> blkEnd = new HashMap<>();
+        for (int bi = 0; bi < f.blocks.size(); bi++) blkEnd.put(f.blocks.get(bi).name, prefixEnd[bi]);
+        for (Ir.Block b : f.blocks) {
+            if (b.ins.isEmpty()) continue;
+            Ir.Value t = b.ins.get(b.ins.size() - 1);
+            if (!Ir.isTerm(t.op)) continue;
+            int termIdx = blkEnd.getOrDefault(b.name, 0) + 1;
+            for (Ir.Value a : t.args) {
+                if (a == null || !(a instanceof Ir.Value)) continue;
+                if (termIdx > last.getOrDefault(a, Integer.MIN_VALUE)) last.put(a, termIdx);
+            }
         }
         for (int i = 0; i < items.size(); i++) {
             Ir.Value v = items.get(i);

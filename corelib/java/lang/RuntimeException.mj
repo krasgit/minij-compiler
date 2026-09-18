@@ -1,0 +1,10 @@
+// P6: java.lang.RuntimeException — базов клас за corelib грешки (P5 runtime:
+// throw/try/catch match-ва по classIndex). message е lean String (char[]).
+
+class RuntimeException {
+    String message;
+
+    RuntimeException() { this(""); }
+    RuntimeException(String m) { message = m; }
+    String getMessage() { return message; }
+}

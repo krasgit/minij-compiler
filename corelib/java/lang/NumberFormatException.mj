@@ -1,0 +1,5 @@
+// P6: java.lang.NumberFormatException extends RuntimeException.
+
+class NumberFormatException extends RuntimeException {
+    NumberFormatException(String m) { super(m); }
+}

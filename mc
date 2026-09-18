@@ -20,7 +20,7 @@ BASE=$(basename "$SRC" .mj)
 janino-parse "$SRC" "$BASE.ast"
 [ "$STAGE" = "ast" ] && { cat "$BASE.ast"; exit 0; }
 
-ast-lower $IMPORTS "$SRC" "$BASE.lir"
+ast-lower $IMPORTS -I "$DIR/corelib" "$SRC" "$BASE.lir"
 [ "$STAGE" = "lir" ] && { cat "$BASE.lir"; exit 0; }
 
 ssa-build "$BASE.lir" "$BASE.ssa"
@@ -60,6 +60,7 @@ else
     CC="${CC:-gcc}"
 fi
 "$CC" -fno-stack-protector -ffreestanding -O2 -c "$DIR/runtime/runtime.c" -o "$BASE.runtime.o"
+"$CC" -fno-stack-protector -ffreestanding -O2 -c "$DIR/runtime/natives.c" -o "$BASE.natives.o"
 if [ "$TARGET" = "arm64" ]; then
     CRT0="$DIR/runtime/crt0.S"
 else
@@ -67,9 +68,9 @@ else
 fi
 "$CC" -c "$CRT0" -o "$BASE.crt0.o" 2>/dev/null \
     || as "$CRT0" -o "$BASE.crt0.o"
-"$CC" -no-pie -nostartfiles "$BASE.o" "$BASE.crt0.o" "$BASE.runtime.o" -lc -o "$OUT"
+"$CC" -no-pie -nostartfiles "$BASE.o" "$BASE.crt0.o" "$BASE.runtime.o" "$BASE.natives.o" -lc -lm -o "$OUT"
 
 if [ "$KEEP" = "0" ]; then
-    rm -f "$BASE.ast" "$BASE.lir" "$BASE.ssa" "$BASE.opt.ssa" "$BASE.mir" "$BASE.alloc.mir" "$BASE.final.mir" "$BASE.s" "$BASE.o" "$BASE.runtime.o" "$BASE.crt0.o"
+    rm -f "$BASE.ast" "$BASE.lir" "$BASE.ssa" "$BASE.opt.ssa" "$BASE.mir" "$BASE.alloc.mir" "$BASE.final.mir" "$BASE.s" "$BASE.o" "$BASE.runtime.o" "$BASE.natives.o" "$BASE.crt0.o"
 fi
 echo "✓ compiled → $OUT"

@@ -5,7 +5,7 @@ fallback: x9
 scratch: x9
 
 # rule v2: 32-bit views of the 64-bit pool (used for i32 values)
-subs: x19=w19, x20=w20, x21=w21, x22=w22, x23=w23, x24=w24, x25=w25, x26=w26, x27=w27, x28=w28, x0=w0, x1=w1, x2=w2, x3=w3, x4=w4, x5=w5, x6=w6, x7=w7, x9=w9
+subs: x19=w19, x20=w20, x21=w21, x22=w22, x23=w23, x24=w24, x25=w25, x26=w26, x27=w27, x28=w28, x0=w0, x1=w1, x2=w2, x3=w3, x4=w4, x5=w5, x6=w6, x7=w7, x9=w9, x10=w10, x11=w11, x12=w12, x13=w13, x10=w10, x11=w11, x12=w12, x13=w13
 
 # double pool / FP ABI (scalar double)
 fregs: d19 d20 d21 d22 d23 d24 d25 d26 d27 d28

@@ -33,8 +33,11 @@ public class Ir {
     public static class Static {
         public String symbol;
         public int size;
+        public boolean init;   // const-initialized (emitted in .data with a value)
+        public long value;     // raw bits; size 4 → (int), size 8 → .quad
         public Static() {}
         public Static(String s, int n) { symbol = s; size = n; }
+        public Static(String s, int n, long v) { symbol = s; size = n; init = true; value = v; }
     }
     public static class Program {
         public String module = "stdin", target = "x86-64";
@@ -99,7 +102,8 @@ public class Ir {
             if (!p.statics.isEmpty()) {
                 sb.append(".statics [\n");
                 for (Static st : p.statics)
-                    sb.append("  ").append(st.symbol).append(" : ").append(st.size).append("\n");
+                    sb.append("  ").append(st.symbol).append(" : ").append(st.size)
+                      .append(st.init ? " : " + st.value : "").append("\n");
                 sb.append("]\n\n");
             }
             for (Func f : p.funcs) func(f);
@@ -250,10 +254,14 @@ public class Ir {
         void readStatics() { next();
             while (!peek().trim().startsWith("]")) {
                 String ln = next().trim(); if (ln.isEmpty()) continue;
-                int c = ln.indexOf(':');
+                String[] parts = ln.split(":", 3);
                 Static st = new Static();
-                st.symbol = ln.substring(0, c).trim();
-                st.size = Integer.parseInt(ln.substring(c + 1).trim());
+                st.symbol = parts[0].trim();
+                st.size = Integer.parseInt(parts[1].trim());
+                if (parts.length > 2 && !parts[2].trim().isEmpty()) {
+                    st.init = true;
+                    st.value = Long.parseLong(parts[2].trim());
+                }
                 p.statics.add(st);
             } next(); }
         void readLoc() { next();

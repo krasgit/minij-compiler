@@ -1,48 +1,51 @@
-// requires: P1 (long, 1L/0x…L literals, SHR/USHR, float/double), P3 (objects),
-//           P5 (throw IllegalArgumentException при bound<=0)
-package java.util;
+// P6: java.util.Random — JDK-идентичен 48-битов LCG (0x5DEECE66D / 0xB / mask
+// 2^48-1). Seed-ът е MiniJ поле long; стъпките next(32/31/26/27/1) са
+// phase-неутрални natives (k_native_Random_step/bits…), последователността е
+// бит-съвместима с JDK за nextInt()/nextLong()/nextBoolean()/nextDouble();
+// nextInt(bound) е modulo форма (документирано отклонение от JDK rejection).
+// MASK е литерал (не shift-израз), защото AstLower третира static init като
+// константен литерал — (1L<<48)-1 не се fold-ва в current lowering.
+class Random {
+    long seed;
 
-public class Random {
-    private static final long MASK = (1L << 48) - 1;
-    private static final long MULT = 0x5DEECE66DL;
-    private static final long ADD = 0xBL;
+    Random() { this(0L); }
+    Random(long s) { setSeed(s); }
 
-    private long seed;
+    void setSeed(long s) { seed = normSeed(s); }
 
-    public Random(long initialSeed) { setSeed(initialSeed); }
-    public Random() { this(System.nanoTime()); }
+    static native long normSeed(long s);
+    static native long step(long s);
+    static native int bits32(long s);
+    static native int bits31(long s);
+    static native int bits26(long s);
+    static native int bits27(long s);
+    static native int bits1(long s);
+    static native long mix64(long hi, long lo);
+    static native double scale53(long hi, long lo);
 
-    public void setSeed(long s) { seed = (s ^ MULT) & MASK; }
-
-    private int next(int bits) {
-        seed = (seed * MULT + ADD) & MASK;
-        return (int) (seed >>> (48 - bits));
+    int nextInt() {
+        seed = step(seed);
+        return bits32(seed);
+    }
+    int nextInt(int bound) {
+        if (bound <= 0) throw new IllegalArgumentException("bound must be positive");
+        seed = step(seed);
+        return bits31(seed) % bound;
+    }
+    long nextLong() {
+        long hi = nextInt();
+        long lo = nextInt();
+        return mix64(hi, lo);
+    }
+    double nextDouble() {
+        long hi = nextBits26();
+        long lo = nextBits27();
+        return scale53(hi, lo);
+    }
+    boolean nextBoolean() {
+        return bits1(nextInt()) != 0;
     }
 
-    public int nextInt() { return next(32); }
-
-    public int nextInt(int bound) {
-        if (bound <= 0) { throw new IllegalArgumentException("bound must be positive"); }
-        int m = bound - 1;
-        if ((bound & m) == 0) {
-            return (int) ((bound * (long) next(31)) >> 31);
-        }
-        int u = next(31);
-        int r = u % bound;
-        while (u - r + m < 0) {
-            u = next(31);
-            r = u % bound;
-        }
-        return r;
-    }
-
-    public long nextLong() { return ((long) next(32) << 32) + next(32); }
-
-    public float nextFloat() { return next(24) / (float) (1 << 24); }
-
-    public double nextDouble() {
-        return (((long) next(26) << 27) + next(27)) * (1.0 / 9007199254740992.0);
-    }
-
-    public boolean nextBoolean() { return next(1) != 0; }
+    long nextBits26() { seed = step(seed); return bits26(seed); }
+    long nextBits27() { seed = step(seed); return bits27(seed); }
 }

@@ -1,55 +1,63 @@
-// requires: P1 (long), P3 (objects, instanceof), P5 (NumberFormatException)
-package java.lang;
+// P6: java.lang.Integer — MiniJ corelib. parseInt/toString върху String
+// (lean char[]); overflow/corruption → NumberFormatException (P5 runtime).
 
-public class Integer {
-    public static final int MIN_VALUE = -2147483648;
-    public static final int MAX_VALUE = 2147483647;
+class Integer {
+    static int MIN_VALUE = -2147483648;
+    static int MAX_VALUE = 2147483647;
 
-    private int value;
-
-    public Integer(int v) { value = v; }
-
-    public int intValue() { return value; }
-
-    public boolean equals(Object o) {
-        return o instanceof Integer && ((Integer) o).value == value;
-    }
-
-    public int hashCode() { return value; }
-
-    public String toString() { return toString(value); }
-
-    public static Integer valueOf(int v) { return new Integer(v); }
-
-    public static String toString(int v) {
-        if (v == 0) return "0";
-        boolean neg = v < 0;
-        char[] buf = new char[11];
-        int i = 11;
-        int u = v;
-        while (u != 0) {
-            int m = u % 10;
-            buf[--i] = (char) ('0' - m);
-            u = u / 10;
-        }
-        if (neg) buf[--i] = '-';
-        return String.wrap(buf, 11 - i);
-    }
-
-    public static int parseInt(String s) {
-        // TODO(P5): throw NumberFormatException при невалиден вход
-        if (s == null || s.length() == 0) return 0;
+    static int parseInt(String s) {
         int i = 0;
-        boolean neg = false;
-        char c = s.charAt(0);
-        if (c == '-' || c == '+') { neg = c == '-'; i = 1; }
+        int n = s.length;
+        if (i < n && s[i] == '-') i = i + 1;
         long v = 0;
-        for (; i < s.length(); i++) {
-            int d = s.charAt(i) - '0';
-            if (d < 0 || d > 9) break;
-            v = v * 10 + d;
+        boolean any = false;
+        while (i < n) {
+            int c = s[i];
+            if (c < 48 || c > 57) throw new NumberFormatException("invalid numeric input");
+            if (v > ((Integer.MAX_VALUE - (c - 48)) / 10)) throw new NumberFormatException("overflow");
+            v = v * 10 + (c - 48);
+            any = true;
+            i = i + 1;
         }
-        if (neg) v = -v;
+        if (!any) throw new NumberFormatException("empty input");
+        if (s[0] == '-') return (int) -v;
         return (int) v;
+    }
+
+    static String toString(int x) {
+        if (x == 0) return "0";
+        boolean neg = x < 0;
+        long v = x;
+        if (neg) v = -v;
+        char[] t = new char[20];
+        int i = 20;
+        while (v > 0) {
+            i = i - 1;
+            t[i] = (char) (48 + (v % 10));
+            v = v / 10;
+        }
+        if (neg) {
+            i = i - 1;
+            t[i] = '-';
+        }
+        int n = 20 - i;
+        char[] r = new char[n];
+        int k = 0;
+        while (i < 20) {
+            r[k] = t[i];
+            k = k + 1;
+            i = i + 1;
+        }
+        return r;
+    }
+
+    int ivalue;
+    Integer(int v) { ivalue = v; }
+    static Integer valueOf(int v) { return new Integer(v); }
+    int intValue() { return ivalue; }
+    int hashCode() { return ivalue; }
+    boolean equals(Integer o) {
+        if (o == null) return false;
+        return o.intValue() == ivalue;
     }
 }

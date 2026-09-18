@@ -1,34 +1,13 @@
-// requires: P2 (масиви + runtime I/O), P3 (static final инициализация, PrintStream)
-package java.lang;
+// P6: java.lang.System — MiniJ corelib. out/err са frontend-special
+// (System.out.print/println → k_print*); реалните полета са плейсхолдъри.
+// exit/currentTimeMillis/nanoTime/arraycopy → @native (runtime/natives.c).
 
-public class System {
-    public static final PrintStream out = new PrintStream(1);
-    public static final PrintStream err = new PrintStream(2);
+class System {
+    static PrintStream out;
+    static PrintStream err;
 
-    public static void exit(int status) { nativeExit(status); }
-
-    public static void arraycopy(int[] src, int s0, int[] dst, int d0, int n) {
-        for (int i = 0; i < n; i++) dst[d0 + i] = src[s0 + i];
-    }
-
-    public static void arraycopy(char[] src, int s0, char[] dst, int d0, int n) {
-        for (int i = 0; i < n; i++) dst[d0 + i] = src[s0 + i];
-    }
-
-    public static void arraycopy(long[] src, int s0, long[] dst, int d0, int n) {
-        for (int i = 0; i < n; i++) dst[d0 + i] = src[s0 + i];
-    }
-
-    public static void arraycopy(boolean[] src, int s0, boolean[] dst, int d0, int n) {
-        for (int i = 0; i < n; i++) dst[d0 + i] = src[s0 + i];
-    }
-
-    public static void arraycopy(double[] src, int s0, double[] dst, int d0, int n) {
-        for (int i = 0; i < n; i++) dst[d0 + i] = src[s0 + i];
-    }
-
-    public static native long currentTimeMillis();
-    public static native long nanoTime();
-
-    static native void nativeExit(int status);
+    static native void exit(int code);
+    static native long currentTimeMillis();
+    static native long nanoTime();
+    static native void arraycopy(int[] src, int srcPos, int[] dst, int dstPos, int len);
 }

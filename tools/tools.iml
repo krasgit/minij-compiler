@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="JAVA_MODULE" version="4">
+  <component name="NewModuleRootManager" inherit-compiler-output="true">
+    <exclude-output />
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/ast-lower" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/emit" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/janino-parse" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/phi-elim" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/regalloc" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/ssa-build" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/ssa-lower" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/ssa-opt" isTestSource="false" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="module" module-name="minij-compiler" />
+    <orderEntry type="library" name="Janino" level="project" />
+  </component>
+</module>

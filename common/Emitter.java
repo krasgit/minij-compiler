@@ -59,12 +59,28 @@ public class Emitter {
                .append(" ").append(poolBits.get(v)).append("\n");
         }
         if (!prog.statics.isEmpty()) {
-            out.append("    .section .bss\n");
-            out.append("    .p2align 3\n");
+            boolean anyData = false, anyBss = false;
             for (Ir.Static st : prog.statics) {
-                out.append("    .globl ").append(st.symbol).append("\n");
-                out.append(st.symbol).append(":\n");
-                out.append("    .zero ").append(st.size).append("\n");
+                if (st.init) anyData = true; else anyBss = true;
+            }
+            if (anyData) {
+                out.append("    .section .data\n");
+                out.append("    .p2align 3\n");
+                for (Ir.Static st : prog.statics) if (st.init) {
+                    out.append("    .globl ").append(st.symbol).append("\n");
+                    out.append(st.symbol).append(":\n");
+                    if (st.size <= 4) out.append("    .long ").append((int) st.value).append("\n");
+                    else out.append("    .quad ").append(st.value).append("\n");
+                }
+            }
+            if (anyBss) {
+                out.append("    .section .bss\n");
+                out.append("    .p2align 3\n");
+                for (Ir.Static st : prog.statics) if (!st.init) {
+                    out.append("    .globl ").append(st.symbol).append("\n");
+                    out.append(st.symbol).append(":\n");
+                    out.append("    .zero ").append(st.size).append("\n");
+                }
             }
         }
     }
@@ -512,8 +528,8 @@ public class Emitter {
             ii = fp ? ii : ii + 1;
             fi = fp ? fi + 1 : fi;
             if (pool == null || argreg == null) continue;
-            String home = R.width(pool, fp ? ptype : "i32");
-            String arg = R.width(argreg, fp ? ptype : "i32");
+            String home = R.width(pool, ptype);
+            String arg = R.width(argreg, ptype);
             if (b.length() > 0) b.append("\n");
             b.append("    ");
             if (arm) b.append(fp ? "fmov " : "mov ").append(home).append(", ").append(arg);

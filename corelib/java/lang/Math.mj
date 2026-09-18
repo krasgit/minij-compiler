@@ -1,50 +1,53 @@
-// requires: P1 (float/double + FP пул, long), P3 (static init, vtable), -lm в natives.c
-package java.lang;
+// P6: java.lang.Math — MiniJ corelib (API-огледало на java.lang).
+// Трансцендентни функции (sqrt/pow/floor/ceil) → libm през @native;
+// abs/min/max/round са чист MiniJ. PI/E — static const инициализатори
+// (frontend constNumericInit → .data .quad).
 
-import java.util.Random;
+class Math {
+    static double PI = 3.141592653589793;
+    static double E = 2.718281828459045;
 
-public class Math {
-    public static final double PI = 3.141592653589793;
-    public static final double E = 2.718281828459045;
-
-    private static final Random rng = new Random(System.nanoTime());
-
-    public static int abs(int v)   { return v < 0 ? -v : v; }
-    public static long abs(long v) { return v < 0 ? -v : v; }
-    public static float abs(float v)   { return v < 0 ? -v : v; }
-    public static double abs(double v) { return v < 0 ? -v : v; }
-
-    public static int min(int a, int b)        { return a < b ? a : b; }
-    public static long min(long a, long b)     { return a < b ? a : b; }
-    public static float min(float a, float b)  { return a < b ? a : b; }
-    public static double min(double a, double b) { return a < b ? a : b; }
-
-    public static int max(int a, int b)          { return a > b ? a : b; }
-    public static long max(long a, long b)       { return a > b ? a : b; }
-    public static float max(float a, float b)    { return a > b ? a : b; }
-    public static double max(double a, double b) { return a > b ? a : b; }
-
-    public static double sqrt(double v)  { return nativeSqrt(v); }
-    public static double pow(double a, double b) { return nativePow(a, b); }
-    public static double floor(double v) { return nativeFloor(v); }
-    public static double ceil(double v)  { return nativeCeil(v); }
-    public static long round(double v)   { return v >= 0 ? (long) (v + 0.5) : (long) (v - 0.5); }
-    public static int round(float v)     { return v >= 0 ? (int) (v + 0.5f) : (int) (v - 0.5f); }
-    public static double exp(double v)   { return nativeExp(v); }
-    public static double log(double v)   { return nativeLog(v); }
-    public static double sin(double v)   { return nativeSin(v); }
-    public static double cos(double v)   { return nativeCos(v); }
-    public static double tan(double v)   { return nativeTan(v); }
-
-    public static double random() { return rng.nextDouble(); }
-
-    static native double nativeSqrt(double v);
-    static native double nativePow(double a, double b);
-    static native double nativeFloor(double v);
-    static native double nativeCeil(double v);
-    static native double nativeExp(double v);
-    static native double nativeLog(double v);
-    static native double nativeSin(double v);
-    static native double nativeCos(double v);
-    static native double nativeTan(double v);
+    static int abs(int x) {
+        if (x < 0) return -x;
+        return x;
+    }
+    static long abs(long x) {
+        if (x < 0) return -x;
+        return x;
+    }
+    static double abs(double x) {
+        if (x < 0) return -x;
+        return x;
+    }
+    static int min(int a, int b) {
+        if (a < b) return a;
+        return b;
+    }
+    static int max(int a, int b) {
+        if (a > b) return a;
+        return b;
+    }
+    static long min(long a, long b) {
+        if (a < b) return a;
+        return b;
+    }
+    static long max(long a, long b) {
+        if (a > b) return a;
+        return b;
+    }
+    static double min(double a, double b) {
+        if (a < b) return a;
+        return b;
+    }
+    static double max(double a, double b) {
+        if (a > b) return a;
+        return b;
+    }
+    static int round(double x) {
+        return (int) (x + 0.5);
+    }
+    static native double sqrt(double x);
+    static native double pow(double a, double b);
+    static native double floor(double x);
+    static native double ceil(double x);
 }

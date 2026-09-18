@@ -40,7 +40,9 @@ public class AstLowerMain {
     int dbgSeq = 1;
 
     // ─── import support ───────────────────────────────────────────────
-    static final Set<String> BUILTIN_TYPES = new HashSet<>(Arrays.asList("String", "System", "PrintStream", "Object"));
+    // String/PrintStream/Object са frontend-special (System се зарежда като реален клас
+    // от corelib/java/lang/System.mj — System.out/err остават special-case-нати за печат).
+    static final Set<String> BUILTIN_TYPES = new HashSet<>(Arrays.asList("String", "PrintStream", "Object"));
     List<Path> srcRoots = new ArrayList<>();
     List<Java.AbstractCompilationUnit> units = new ArrayList<>();
     Map<Java.AbstractCompilationUnit, Unit> unitOf = new LinkedHashMap<>();
@@ -289,6 +291,44 @@ public class AstLowerMain {
         }
     }
 
+    /** Константен числов инициализатор за static поле (литерал или ±литерал).
+     *  Връща raw bits (за f64 — IEEE-64; за i64 — значещата стойност; за i32 —
+     *  sign-extended int), или null ако не е константна числова форма. */
+    static Object constNumericInit(Object ini, String ft) {
+        if (ini instanceof Java.UnaryOperation u && "-".equals(u.operator)) {
+            Object base = constNumericInit(get(u, "operand"), ft);
+            if (base == null) return null;
+            long b = (Long) base;
+            if (ft.equals("f64")) return Double.doubleToRawLongBits(-Double.longBitsToDouble(b));
+            if (ft.equals("i64")) return -b;
+            return (long) ((int) -(int) b);
+        }
+        if (ini instanceof Java.FloatingPointLiteral lit) {
+            String vs = String.valueOf(get(lit, "value"));
+            return Double.doubleToRawLongBits(Double.parseDouble(vs));
+        }
+        if (ini instanceof Java.IntegerLiteral lit) {
+            String vs = lit.value;
+            boolean isL = vs.endsWith("L") || vs.endsWith("l");
+            if (isL) vs = vs.substring(0, vs.length() - 1);
+            long v = parseLongSmart(vs);
+            if (ft.equals("f64")) return Double.doubleToRawLongBits(isL ? (double) v : (double) (int) v);
+            if (ft.equals("i64") || isL) return v;
+            return (long) (int) v;
+        }
+        return null;
+    }
+
+    static long parseLongSmart(String s) {
+        s = s.replace("_", "");
+        String t = s;
+        int radix = 10;
+        if (s.startsWith("0x") || s.startsWith("0X")) { t = s.substring(2); radix = 16; }
+        else if (s.startsWith("0b") || s.startsWith("0B")) { t = s.substring(2); radix = 2; }
+        else if (s.length() > 1 && s.startsWith("0") && !s.startsWith("0.")) { t = s.substring(1); radix = 8; }
+        return Long.parseLong(t, radix);
+    }
+
     // ─── reflection helper ───
     static Object get(Object o, String field) {
         if (o == null) return null;
@@ -394,9 +434,17 @@ public class AstLowerMain {
                 String name = getStr(vd, "name");
                 if (isStatic) {
                     Object ini = get(vd, "initializer");
-                    if (ini != null)
-                        throw new RuntimeException("static field initializers not supported yet: " + cn + "." + name);
                     String sym = cn + "_" + name;
+                    if (ini != null) {
+                        Object kv = constNumericInit(ini, ft);
+                        if (kv == null)
+                            throw new RuntimeException("static field initializer must be a numeric constant literal: " + cn + "." + name);
+                        Long cv = (Long) kv;
+                        statics.add(new Ir.Static(sym, ft.equals("i32") ? 4 : 8, cv));
+
+                        staticFields.computeIfAbsent(cn, k -> new LinkedHashMap<>()).put(name, new Object[]{ ft, sym, jt });
+                        continue;
+                    }
                     statics.add(new Ir.Static(sym, ft.equals("i32") ? 4 : 8));
                     staticFields.computeIfAbsent(cn, k -> new LinkedHashMap<>()).put(name, new Object[]{ ft, sym, jt });
                     continue;
