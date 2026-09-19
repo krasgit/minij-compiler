@@ -143,6 +143,73 @@ emit OR_i32(x, y) {
     orl ${y}, %eax
     movl %eax, $dst
 }
+emit XOR_i32(x, y) {
+    movl ${x}, %eax
+    xorl ${y}, %eax
+    movl %eax, $dst
+}
+emit AND_i64(x, y) {
+    movq ${x}, %rax
+    andq ${y}, %rax
+    movq %rax, $dst
+}
+emit OR_i64(x, y) {
+    movq ${x}, %rax
+    orq ${y}, %rax
+    movq %rax, $dst
+}
+emit XOR_i64(x, y) {
+    movq ${x}, %rax
+    xorq ${y}, %rax
+    movq %rax, $dst
+}
+emit NOT_i32(x) {
+    movl ${x}, %eax
+    notl %eax
+    movl %eax, $dst
+}
+emit NOT_i64(x) {
+    movq ${x}, %rax
+    notq %rax
+    movq %rax, $dst
+}
+
+emit SHL_i32(x, y) {
+    movl ${x}, %eax
+    movl ${y}, %ecx
+    shll %cl, %eax
+    movl %eax, $dst
+}
+emit SHR_i32(x, y) {
+    movl ${x}, %eax
+    movl ${y}, %ecx
+    sarl %cl, %eax
+    movl %eax, $dst
+}
+emit USHR_i32(x, y) {
+    movl ${x}, %eax
+    movl ${y}, %ecx
+    shrl %cl, %eax
+    movl %eax, $dst
+}
+emit SHL_i64(x, y) {
+    movq ${x}, %rax
+    movl ${y}, %ecx
+    shlq %cl, %rax
+    movq %rax, $dst
+}
+emit SHR_i64(x, y) {
+    movq ${x}, %rax
+    movl ${y}, %ecx
+    sarq %cl, %rax
+    movq %rax, $dst
+}
+emit USHR_i64(x, y) {
+    movq ${x}, %rax
+    movl ${y}, %ecx
+    shrq %cl, %rax
+    movq %rax, $dst
+}
 
 emit CMPLT_i32(x, y) {
     movl ${x}, %eax

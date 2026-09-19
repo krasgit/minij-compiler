@@ -39,20 +39,21 @@
 **Goal:** Нула остарели пътища/граматики в docs; harness-състоянието е изрично
 документирано; repo-конвенциите са приведени в ред.
 
-**Status:** ⬜ TODO
+**Status:** ⚠️ PARTIAL (T1/T4/T9 зaвършени; T2/T5/T6/T7 отворени; T8 спорен — `.iml`
+вече са committed, не untracked)
 
 | ID | Задача | Description | Files | Depends | Done when | Verification |
 |---|---|---|---|---|---|---|
-| M0-T1 | CONTEXT.md пътища | Замени `/shared/compiler`/Termux-течения с текущия repo + Debian/Maven фактите. | `docs/CONTEXT.md` | — | Няма остарял път/инструмент | `grep -r "/shared/compiler" docs/` празен |
-| M0-T2 | grammar.md ъпдейт | `.mj` grammar покрива само `int\|void` (P0). Добави масиви, String, класове/обекти, long/double, control. | `docs/grammar.md` | — | Grammar съответства на `examples/{obj*,.cflow,.md}` | Ръчна сверка с examples |
-| M0-T3 | MIGRATE §4 x86-бележка | gcd(48)/forloop(hang) са от **преди** spillStore fix-а (`41b4381`); фактическото x86 състояние подлежи на проверка. | `docs/MIGRATE.md` | — | Бъдещата x86-статия е помечена като пре-фикс | Ръчен преглед |
-| M0-T4 | Harness-бележка | 29-теста `run_tests.sh` са били в `/tmp/opencode` и НЕ са в repo (репото има само `test.sh` с 4 теста). Baseline за feature-milestones; възстановяване като `scripts/run_tests.sh` при първия feature. | `docs/PLAN.md`, `docs/CONTEXT.md` | — | Изрично документирано + pointer | grep |
-| M0-T5 | Progress Log раздел | Добави дневник формат (дата / milestone / HEAD / regression / commit) + запълни историята P0→P4 от CONTEXT.md. | `docs/PLAN.md` | — | Логът съдържа миналите milestones | Ръчен преглед |
-| M0-T6 | ir-format.md: нови IR блокове | Документирай `.vtables` (P3 obj6), `.statics` (P3 obj7) и ops `vt_ref`/`icall`/`lea_static`/`alloc_obj`/`lea_field` — липсват. | `docs/ir-format.md` | — | Всички ops, които Writer/Reader поддържат, са документирани | `grep vt_ref docs/ir-format.md` |
-| M0-T7 | rule-format.md: args.../return | Добави `args...` pattern (`${cargs}` loop-list, base=1) и void `return()` rules (arm `mov x0,#0; b exit` / x86 `movl $0,%eax; jmp exit`). | `docs/rule-format.md` | — | Документирано v2 + нови плейсхолдъри | `grep args. docs/rule-format.md` |
-| M0-T8 | .gitignore: .iml | Добави `*.iml` (minij-compiler.iml, tools.iml са untracked). | `.gitignore` | — | `git status` чист от `.iml` | `git status` |
-| M0-T9 | CONTEXT авто-HEAD | Императивът вече казва да се обновява HEAD/Status; да се изпълни при следващия commit. | `docs/CONTEXT.md` | — | HEAD/Status актуални | `git log -1 --oneline` |
-| M0-T10 | CI (optional) | GitHub Actions: x86-64 нативен + arm64 през qemu-aarch64, N/N — ако е необходимо. | `.github/workflows/ci.yml` | M0-T4 | CI зелено на push | Actions статус |
+| M0-T1 ✅ | CONTEXT.md пътища | Замени `/shared/compiler`/Termux-течения с текущия repo + Debian/Maven фактите. | `docs/CONTEXT.md` | — | Няма остарял път/инструмент | `grep -r "/shared/compiler" docs/` празен |
+| M0-T2 ⬜ | grammar.md ъпдейт | `.mj` grammar покрива само `int\|void` (P0). Добави масиви, String, класове/обекти, long/double, control. | `docs/grammar.md` | — | Grammar съответства на `examples/{obj*,.cflow,.md}` | Ръчна сверка с examples |
+| M0-T3 ⬜ | MIGRATE §4 x86-бележка | gcd(48)/forloop(hang) са от **преди** spillStore fix-а (`41b4381`); фактическото x86 състояние подлежи на проверка (в момента само textual x86, без асемблер). | `docs/MIGRATE.md` | — | Бъдещата x86-статия е помечена като пре-фикс | Ръчен преглед |
+| M0-T4 ✅ | Harness-бележка | 29-теста `run_tests.sh` са били в `/tmp/opencode` и НЕ са в repo (репото има само `test.sh` с 4 теста). Baseline за feature-milestones; възстановяване като `scripts/run_tests.sh` при първия feature. | `docs/PLAN.md`, `docs/CONTEXT.md` | — | Изрично документирано + pointer | grep |
+| M0-T5 ⬜ | Progress Log раздел | Добави дневник формат (дата / milestone / HEAD / regression / commit) + запълни историята P0→P6 от CONTEXT.md. | `docs/PLAN.md` | — | Логът съдържа миналите milestones | Ръчен преглед |
+| M0-T6 ⬜ | ir-format.md: нови IR блокове | Документирай `.vtables` (P3 obj6), `.statics` (P3 obj7, сега и с const-инициализатори — P6) и ops `vt_ref`/`icall`/`lea_static`/`alloc_obj`/`lea_field` — липсват. | `docs/ir-format.md` | — | Всички ops, които Writer/Reader поддържат, са документирани | `grep vt_ref docs/ir-format.md` |
+| M0-T7 ⬜ | rule-format.md: args.../return | Добави `args...` pattern (`${cargs}` loop-list, base=1) и void `return()` rules (arm `mov x0,#0; b exit` / x86 `movl $0,%eax; jmp exit`). | `docs/rule-format.md` | — | Документирано v2 + нови плейсхолдъри | `grep args. docs/rule-format.md` |
+| M0-T8 ⚠️ | .gitignore: .iml | `minij-compiler.iml`/`tools.iml` вече са **committed** в `31db14d` — решени: да останат tracking или `git rm --cached` + `.gitignore *.iml`. | `.gitignore` | — | Изборът записан | `git status` |
+| M0-T9 ✅ | CONTEXT авто-HEAD | Императивът вече казва да се обновява HEAD/Status; да се изпълни при следващия commit. | `docs/CONTEXT.md` | — | HEAD/Status актуални | `git log -1 --oneline` |
+| M0-T10 ⬜ | CI (optional) | GitHub Actions: x86-64 нативен + arm64 през qemu-aarch64, N/N — ако е необходимо. | `.github/workflows/ci.yml` | M0-T4 | CI зелено на push | Actions статус |
 
 **Dependencies:** M0-T1..T4, T8 независими; T5/T6/T7/T9 след смисловите docs.
 
@@ -111,11 +112,12 @@ System.out, String methods.
 
 **Goal:** Дълги програми (вкл. corelib-низови цикли) да не изчерпват bump-arena-та.
 
-**Status:** ⬜ TODO
-
-**Trigger:** реално ударихме OOM: `App.mj` с `i<=100000` + string literal в loop →
-SIGSEGV/exit-139. Смятано: `"hello1 "` се пре-алокира всеки iteration (~48B) → ~341
-алокации до 16KB арена.
+**Status:** ⬜ TODO (рискът е потвърден жив: `String.toString`/`concat` алокират свеж
+char[] на всеки call; `examples/corelib.mj` в момента минава — кратките му цикли
+събират <16KB — но дългите низови run-ове пак могат да ударят 16KB bump-arena)
+**Trigger verification (31db14d):** `examples/corelib.mj` → компилира, линква
+(natives.o), exit 0 — `5/7/3/4/…`, виж Progress Log. OOM-тестът от преди
+(`App.mj` i<=100000 + string literal) НЕ е в harness.
 
 | ID | Задача | Description | Files | Depends | Done when | Verification |
 |---|---|---|---|---|---|---|
@@ -126,6 +128,24 @@ SIGSEGV/exit-139. Смятано: `"hello1 "` се пре-алокира все�
 
 **Milestone Completion Criteria:** дългопрограмни тестове без OOM; String-layout
 документиран. Това е **блокер за M8 (corelib)** — низовете в дълги run-ове.
+
+---
+
+## Milestone M3.6 (P2.5) — Пакети / import (NEW)
+
+**Goal:** Проект от няколко `.mj` файла — `package`, `import` (single-type/on-demand/
+static), транзитивен closure-load на модула. **Тоя milestone НЕ беше в първоначалния
+PLAN — добавено по факт.**
+
+**Status:** ✅ DONE (`examples/imports/imports.mj`; **31/31**; commit `60c6ddb`)
+
+**Синопсис (подробности в CONTEXT.md):** `ast-lower` зарежда затварянето (closure) на главния
+файл до фикс-точка (`addUnit/loadClosure/processImports/loadClassFile/loadFromPath/
+findFile/resolveRefs/onDemandPkgs/walkRefs`); flat simple-name namespace; `norm()`
+свежда dotted Java-тип до просто име навсякъде (с `[]`-суфикси); static import →
+`importedStaticMethod/importedStaticField`. Source roots: dir на входния файл + `-I`
+(`mc`) / `--src` (`ast-lower`). Попътно: `mc` линква с **`-no-pie`** (PIE +
+`R_AARCH64_RELATIVE` vtable relocations segfault-ваха под qemu).
 
 ---
 
@@ -182,20 +202,16 @@ short-circuit &&/||, compound, ++/--, assignment-as-expression.
 
 **Goal:** `throw`, `try/catch/finally`, runtime unwinding, Exception + subclasses.
 
-**Status:** ⬜ TODO
+**Status:** ✅ DONE (`examples/exc.mj`; **30/30**; commit `961995e`)
 
-| ID | Задача | Description | Files | Depends | Done when | Verification |
-|---|---|---|---|---|---|---|
-| M7-T1 | EH frontend | Janino AST shapes за `throw`/`try/catch/finally` (probe в /tmp/opencode) + lowering до EH ops. | `tools/ast-lower/AstLowerMain.java` | M4 (класове) | `.lir` с EH-ops | `mc --stage=lir` ръчен |
-| M7-T2 | EH IR/regalloc/emit | Ops `THROW`/`EH_*`/catch param/finally merge през `Ssa/Ir/PhiElim/Regalloc` + Emitter rules (arm+x86). | `common/Ir.java`, `common/Ssa.java`, `common/PhiElim.java`, `common/Regalloc.java`, `rules/{arm,x86}.rule` | M7-T1 | SSA map-ва без падане, ops минават | `mvn compile`; IR дъмп |
-| M7-T3 | Unwinding | frame-walk (crt0-то push fp) ИЛИ setjmp-style; runtime helpers. | `runtime/runtime.c`, `runtime/crt0.S`, `runtime/crt0-x64.S` | M7-T2 | `throw` стига хandler-а; x0/rax коректни | EH пример |
-| M7-T4 | Exception класове | `Exception`/`RuntimeException` + NPE/AIOOBE/NumberFormat/IllegalArgument (message via String). | `corelib/java/lang/*.mj` | M7-T3, M4 | catch-ва тип-hierarchy | corelib пример |
-| M7-T5 | parseInt интеграция | `Integer.parseInt` хвърля `NumberFormatException` (placeholder в corelib draft). | `corelib/java/lang/Integer.mj` | M7-T4, M3 | невалиден вход → exception | corelib тест |
-| M7-T6 | Регресия | EH пример + **пълна N/N x86-64 (+arm64)**. | `examples/*.mj`, harness | M7-T5, **M0-T4 (harness)** | N/N и двата таргета | harness |
-
-**Dependencies:** M4 (класове), M3 (String/message), M0-T4 (verify harness).
-
-**Milestone Completion Criteria:** всички P5 features + N/N x86-64 (+arm64).
+**Синопсис (подробности в CONTEXT.md):** ops `EH_LAB`/`FP`/`EH_EXC`, func-метаданни
+`.ehvar/.ehcatch/.ehfin/.ehsrc`; per-try dispatcher в края на функцията с frame-restore
+**преди** match (иначе stale `exc_head` → безкраен re-catch); runtime `ExcRec` pool +
+`exc_head` + `k_throw` chain-walk (uncaught → `#<classIndex>`, exit 3); frontend
+`ExcGuard`/`unwindGuards()` за return/break/continue + finally и по трите пътя + `ehf`
+re-throw. Core Exception класове (`NumberFormat/IllegalArgument/NullPointer/
+ArrayIndexOutOfBounds/RuntimeException`) вече съществуват в `corelib/java/lang/*.mj`
+от P6 — виж M8.
 
 ---
 
@@ -203,22 +219,36 @@ short-circuit &&/||, compound, ++/--, assignment-as-expression.
 
 **Goal:** Компилируема `corelib/` (API-огледало на java.base) + native/libm + tests.
 
-**Status:** ⚠️ PARTIAL — draft `.mj` съществуват (tracked), но не компилират още
-(corelib.md: „не се компилират още“).
+**Status:** ✅ DONE — **ядрото компилира и върви в harness (33/33)**:
+`examples/corelib.mj` → exit 0, детерминиран изход; Long/Integer/Math/Arrays/System
+**bit-точни vs JDK-17**; **Random — бит-идентичен с JDK-17** (чист MiniJ LCG, root-cause:
+DCE изтриваше void virtual call-ове в ctors → seed stuck на 0). Нов `examples/bitop.mj`
+(shift/bitwise, `>>>`, &31/&63 masking, compound) — бит-идентичен с JDK oracle.
 
 | ID | Задача | Description | Files | Depends | Done when | Verification |
 |---|---|---|---|---|---|---|
-| M8-T1 | Езикови празнини | `long >>>`, `1L`/`0x…L` literali, липсващи FP ops, за да компилират `Long/Random/Arrays(long)`. | frontend/rules | M2, M3 | corelib .mj компилират | `mc corelib/... --stage=exe` |
-| M8-T2 | natives.c + mc-corelib build (T6) | Registry `k_native_<Cls>_<name>_<arity>` за Math→libm; нов `bin/mc-corelib` build в `build.sh`. | `corelib/natives.c` (NEW), `build.sh`, `mc` | M8-T1, M2 (native) | Math (sqrt/pow/…) работи | Math пример |
-| M8-T3 | java.lang impl | System/PrintStream/Object(typeName)/String пълните методи (indexOf/substring/compareTo/…). | `corelib/java/lang/*.mj` | M8-T1, M8-T2 | smoke тестове | corelib smoke |
-| M8-T4 | java.util impl | Arrays (sort/binarySearch/copyOf/equals/toString/fill), Random (48-bit LCG JDK-бит). | `corelib/java/util/*.mj` | M8-T3 | Random+Arrays вървят | seeded Random сравнение |
-| M8-T5 | Тестове | `examples/corelib/*.mj` + harness entries + N/N и двата таргета. | `examples/corelib/` (NEW), harness | M8-T4, M0-T4 | N/N и двата таргета | harness |
+| M8-T1 ✅ | Езикови празнини | `<< >> >>> & | ^ ~` end-to-end (frontend mapOp + shift masking &63/&31, compound `<<= >>= >>>= &= |= ^=`, `~`), `long >>>` (LSR_i64), `0x…`/`0b…`/underscore literali (parseLongSmart), FP ops (Math natives). Остатък: FP ops `exp/log/sin/cos/tan` + Минифолд не-фолдваните константи не е блокер. | frontend/rules | M2, M3 | corelib .mj компилират | `mc corelib/... --stage=exe` |
+| M8-T2 ✅ | natives.c + mc build (T6) | `runtime/natives.c` (System exit/currentTimeMillis/nanoTime/arraycopy, Math sqrt/pow/floor/ceil → libm); Random natives ПРЕМАХНАТИ (LCG е чист MiniJ). `mc` компилира natives.o и линква `-lc -lm`. | `runtime/natives.c`, `mc`, `build.sh` | M8-T1, M2 (native) | Math (sqrt/pow/…) работи | Math пример (`examples/corelib.mj`) |
+| M8-T3 ⚠️ | java.lang impl | System (out/err frontend-special + 4 natives), Object/PrintStream playholders, String methods (equals/concat от P2, toString де факто през char[]), Integer/Long/Math **bit-точни**. | `corelib/java/lang/*.mj` | M8-T1, M8-T2 | smoke тестове | corelib smoke |
+| M8-T4 ✅ | java.util impl | Arrays (fill/sort/binarySearch/equals/toString), Random (48-bit LCG JDK-бит, **чист MiniJ**: rejecton sampling за `nextInt(bound)`, маската като литерал). | `corelib/java/util/*.mj` | M8-T3 | Random+Arrays вървят | seeded Random сравнение |
+| M8-T5 ✅ | Тестове в harness | `check corelib 0 "<JDK-точни стойности>"` + `check bitop 0 "<oracle>"` в `scripts/run_tests.sh` → 33/33. | `scripts/run_tests.sh`, docs | M8-T4, M0-T4 | N/N и двата таргета | harness |
 
-**Blocking бележка:** corelib низовите цикли изискват **M3.5-T1** (иначе дълги
-run-ове крашват в 16KB bump arena).
+**Документирани остатъци (NOT bugs):**
+1. ~~`Random(1L)` — първият `nextInt()` дава `0`~~ — **РЕШЕНО** (root-cause DCE:
+   `icall`/`ICALL_*` не бяха rooted в `common/Opt.java` → `setSeed()` (void virtual call
+   в ctor-а) се махаше като dead code → seed 0). След fix: `-1155869325/431529176/
+   7564655870752979346/…` = JDK-17 **бит-идентичен** (8/8 draw-а + Arrays/Math).
+2. ~~`nextInt(bound)` е modulo~~ — **РЕШЕНО** с JDK rejection sampling (детерминиран, bit-точен).
+3. `System.arraycopy` е native `memcpy/memmove` без range-check (`ArrayIndexOutOfBounds`).
+4. Shift-fold в static init (`(1L<<48)-1`) НЕ се fold-ва — Random ползва литерал-маска
+   `281474976710655L` (без рантайм последица).
+5. FP ops `exp/log/sin/cos/tan` (Math natives) — не-блокер за P6, опр. се появяват в M11/M12.
+
+**Blocking бележка:** дългите низови цикли пак зависят от **M3.5-T1** (16KB bump
+arena). Текущите corelib примери събират <16KB и минават.
 
 **Milestone Completion Criteria:** програма (String+Integer+Math+Arrays+Random) се
-компилира и изпълнява; N/N и двата таргета.
+компилира и изпълнява; добавена в harness; N/N и двата таргета.
 
 ---
 
@@ -280,6 +310,23 @@ Safepoints за всички нишки, per-thread root set scanning. **Изи�
   **i32↔i64** sign-extend — `MOVSXT_i64` DONE.
 - **native ABI** `k_native_<Class>_<name>_<arity>` фиксиран (P0) — corelib/libm/pthread ползват него.
 - **vtables в `.data`** (R_AARCH64_RELATIVE → не .rodata); статика в `.bss`.
+- **P6 param-receive width (Emitter.java:531-532)**: при CALL param-receive/arg-reload
+  ширината е **`ptype`**, не хардкод `"i32"` — старият `fp ? ptype : "i32"` трошеше
+  всички cross-call i64/ptr до low-32 (Long/Integer parsing даваха грешни стойности).
+- **P6 static const init**: `.statics` блокът поддържа 3-ти елемент `: value` —
+  `AstLower.constNumericInit()` позволява константни числови инициализатори
+  (`static long MAX_VALUE = 9223372036854775807L;`) → `.data` с `.long/.quad`;
+  non-const init → `RuntimeException`.
+- **P6 Random (финален)**: чист MiniJ, **без natives** (`runtime/natives.c` Random
+  helpers-ите са премахнати). `next(48-bit)` = `(seed*5DEECE66D+0xB)&281474976710655L`
+  (маската е литерал — static shift-fold не се прави); `nextInt(bound)` = JDK rejection
+  sampling. **Бит-идентичен с JDK-17** за цялата последователност от `Random(1L)`
+  (проверено: `-1155869325/431529176/7564655870752979346/207/0/-1465154083/78/48`).
+  Root-cause на старото отклонение: **DCE bug** — `common/Opt.java` root-ваше
+  `call`/`CALL_*`, но НЕ `icall`/`ICALL_*` → void-виртуални call-ове (напр. `setSeed()`
+  в ctor-а) се изтриваха като dead code. Виж M8.
+- **P6 natives.mc**: natives-ите се компилират като отделен `natives.o` и се линкват с
+  `-lc -lm` директно в `mc` (без отделен `mc-corelib` build).
 
 ## Pipelines-факти (сверени, за да не се преоткриват)
 
@@ -291,44 +338,77 @@ Safepoints за всички нишки, per-thread root set scanning. **Изи�
   `k_string_equals/k_string_concat`; OOB → `sys_exit(134)`; `mm_alloc` bump 16KB.
 - Emitter template плейсхолдъри: `reg/valReg/${ws}/${args}/${argregs}/${params}/${imm}/${imov}/
   ${scratch}/${cargs}`; RuleParser `args...`; spill temps arm `w/x/d11..13`, x86 `%r11`.
+- **P6 build/link**: `mc` компилира и `runtime/natives.c` (natives.o) и линква
+  `-lc -lm`; `bin/emit-*` = общ `EmitMain --target=` (legacy `tools/emit-arm|emit-x86`
+  изтрити); `.statics` има `init/value`.
 
 ---
 
 ## Execution Order
 
 ```
-M0 (docs sync) → M3.5 (runtime-памет) → [ M5 (GC) ‖ M7 (exceptions) ] → M8 (corelib) → M9 (threads) → M10 (modern)
+M0 (docs sync, PARTIAL) → M3.6 (P2.5 import ✅) → M3.5 (runtime-памет) → [ M5 (GC) ‖ M7 (P5 ✅) ]
+→ M8 (core lib ✅ 33/33) → M9 (threads) → M10 (modern)
 ```
 
-- **M5 и M7 са независими** — паралелни след M0/M3.5.
+- **M5 и M7 са независими** — M7 е **DONE**; M5 (GC) остава свободен кандидат.
+- **M8 (P6) е DONE** — corelib в harness (33/33); следващ кандидат: **M5 GC** или
+  **M3.5 runtime-памет** (надвишаване на 16KB bump-arena).
 - **M8 изисква M3.5-T1** (дълги низови програми) + M2–M7.
 - **M9 изисква M5 (GC×STW) и M7 (InterruptedException).**
-- Всички feature-milestones изискват M0-T4 harness baseline.
+- Всички feature-milestones изискват M0-T4 harness baseline (✅ — scripts/run_tests.sh).
 
 ---
 
 ## Current Reality Check (source = истина)
 
-1. **Harness загубен (T4):** 29-теста не са в repo (само `test.sh` 4 теста).
-   x86-64 след `41b4381` (spillStore fix) не е пълно верифициран — MIGRATE §4
-   gcd(48)/forloop(hang) са пре-фикс (обновени в M0-T3).
+1. **Harness е в repo (T4 DONE):** `scripts/run_tests.sh` — **33/33 PASS на arm64**
+   (native aarch64 хост): corelib и bitop са включени (JDK-точни очаквани изходи).
+   x86 remains textual-only (без x86 as/ld на тази кутия).
 2. **P1-останало е фикция:** i8→i32 (`AstLowerMain:94`), MOVSXT_i64 DONE
    (`arm.rule:219`/`x86.rule:286`), float→f64 (`AstLowerMain:97`).
 3. **P3.5 seam НЕ е готов:** няма trace-tables/GC maps/safepoints/монитори в source;
-   header е само class-index(+pad) (`AstLowerMain:110`, `st_hdr`).
-4. **P6 = PARTIAL:** draft `.mj` tracked; няма `natives.c`/`bin/mc-corelib`/`examples/corelib`.
-5. **M3.5 бъг:** 16KB bump-arena → OOM при string-literal loops (~341 алокации),
-   SIGSEGV/exit-139 (доказано с `App.mj` 100000).
-6. **Git-статус:** текущ бранч `fix/x86-spill-store-and-outdir` (HEAD `41b4381`) с
-   uncommitted README/pom/run.sh/App.mj от x86/Maven сесията — да се комитне при това.
-7. **Env:** Debian x86-64, JDK17 за Maven build, arm64 cross + qemu-aarch64;
-   CONTEXT.md Termux-факти са остарели → M0-T1.
+   header е само class-index(+pad) (`st_hdr`).
+4. **P6 (M8) = DONE:** `corelib/` компилира и върви в harness; `runtime/natives.c` +
+   `-lm` линк в `mc`; bit-точни Long/Integer/Math/Arrays/System; **Random бит-идентичен
+   с JDK-17** (чист MiniJ + rejection sampling); shift/bitwise ops end-to-end (`bitop.mj`,
+   JDK-идентичен). Progress Log актуален.
+5. **M3.5 бъг (жив):** 16KB bump-arena → OOM при string-literal loops; corelib.mj
+   минава защото събира <16KB; дългите низови run-ове пак рискуват.
+6. **Git-статус:** преди следващия commit — HEAD `31db14d`; `tools/emit-arm/`,
+   `tools/emit-x86/` изтрити (legacy, bin/emit-* ползват общ `EmitMain`); `.iml`
+   committed (спор за .gitignore). Env: **native aarch64 хост**, /shared е
+   **no-chmod/диск без exec** → build/test трябва да вървят от exec-копие
+   (напр. `cp -r /shared/compiler → /tmp/opencode/minij`).
+7. **Env:** Debian/arm64, JDK17; CONTEXT.md Termux-факти — остарели (M0-T1 done).
 
 ---
 
 ## Progress Log
 
-_Поле се попълва от M0-T5. Формат:_ `дата | milestone | HEAD | regression | commit`
+_Формат:_ `дата | milestone | HEAD | regression | commit`
+
+- `2026-09-19 | P6 corelib (M8, DONE — shift/bitwise ops, Random bit-exact JDK, bitop) | 31db14d → нов | 33/33 | <нов commit>`
+- `2026-09-18 | P2.5 packages/import (M3.6, DONE) | 60c6ddb | 31/31 | 60c6ddb`
+- `2026-09-18 | P5 exceptions (M7, DONE) | 961995e | 30/30 | 961995e`
+- `2026-09-18 | P4 control flow (M6, DONE) | be8233d | 29/29 | be8233d`
+- `2026-09-18 | P3 void+static void main (obj10) | ee95a94 | 28/28 | ee95a94`
+- `2026-09-18 | P3 Foo[] (obj9) | 1ac9d83 | 27/27 | 1ac9d83`
+- `2026-09-18 | P3 super.method/field (obj8) | (HEAD тогава) | 26/26 | 1ac9d83`
+- `2026-09-18 | P3 static полета (obj7) | 5a17f16 | 25/25 | 5a17f16`
+- `2026-09-18 | P3 vtable dispatch (obj6) | 580c5fd | 24/24 | 580c5fd`
+- `2026-09-18 | P3 extends/super (obj5) | 6f056f7 | 23/23 | 6f056f7`
+- `2026-09-18 | P3 instanceof/cast (obj4) | ed21fa3 | 22/22 | ed21fa3`
+- `2026-09-18 | P3 ctors+this (obj3) | 27d0ac9 | 21/21 | 27d0ac9`
+- `2026-09-18 | P3 methods+overloads (obj2) | 8f11393 | 20/20 | 8f11393`
+- `2026-09-18 | P3 classes (obj) | 081e7a2 | 19/19 | 081e7a2`
+- `2026-09-18 | P2 String.equals/concat (str3) | b9e3499 | 18/18 | b9e3499`
+- `2026-09-18 | P2 multi-D + spill (md) | e89d6f4 | 17/17 | e89d6f4`
+- `2026-09-18 | P2 String/char/System.out (str) | b5f2736 | 16/16 | b5f2736`
+- `2026-09-18 | P2 arrays | 824824d | 14/14→16/16 | 824824d`
+- `2026-09-18 | P1 native | 60f704e | 12/12 | 60f704e`
+- `2026-09-18 | P1 types | 318c431 | 9/9→12/12 | 318c431`
+- `2026-09-18 | P0 infra | 8873729 | 8/8 | 8873729`
 
 ---
 

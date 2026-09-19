@@ -6,10 +6,8 @@
  * platform C calling convention (i32 → w-regs, i64/ptr → x-regs, fp → d-regs,
  * aarch64), same as examples/native.mj.
  *
- * java.util.Random: every function here is phase-neutral — it does NOT
- * advance the LCG seed. The MiniJ Random class owns the `seed` field and
- * advances it with step() exactly like JDK's next(bits) calls, so the whole
- * sequence is bit-identical to `java.util.Random`.
+ * java.util.Random is fully implemented in MiniJ (corelib/java/util/Random.mj)
+ * — no natives needed (P6 shift/bitwise/long ops).
  */
 
 #include <stdlib.h>
@@ -49,32 +47,3 @@ double k_native_Math_sqrt_1(double x) { return sqrt(x); }
 double k_native_Math_pow_2(double a, double b) { return pow(a, b); }
 double k_native_Math_floor_1(double x) { return floor(x); }
 double k_native_Math_ceil_1(double x) { return ceil(x); }
-
-/* ── java.util.Random: JDK-identical 48-bit LCG ───────────────────────── */
-
-#define RMULT 0x5DEECE66DL
-#define RADD  0xBL
-#define RMASK 0x0000FFFFFFFFFFFFL
-
-/* setSeed(s): seed = (s ^ MULTIPLIER) & MASK */
-long k_native_Random_normSeed_1(long s) { return (s ^ RMULT) & RMASK; }
-/* one next(bits)-style advance: seed = (seed * A + C) & MASK */
-long k_native_Random_step_1(long s) { return (s * RMULT + RADD) & RMASK; }
-
-/* JDK next(bits) read = (int)(seed >>> (48 - bits)), no advance. */
-int k_native_Random_bits32_1(long s) { return (int)((unsigned long) s >> 16); }
-int k_native_Random_bits31_1(long s) { return (int)((unsigned long) s >> 17); }
-int k_native_Random_bits26_1(long s) { return (int)((unsigned long) s >> 22); }
-int k_native_Random_bits27_1(long s) { return (int)((unsigned long) s >> 21); }
-int k_native_Random_bits1_1(long s)  { return (int)((unsigned long) s >> 47); }
-
-/* nextLong: (((long)next(32)) << 32) + next(32) — hi/lo are the two draws. */
-long k_native_Random_mix64_2(long hi, long lo) {
-    return ((long) (unsigned int) hi << 32) + (lo & 0xFFFFFFFFL);
-}
-
-/* nextDouble: (((long)next(26)) << 27) + next(27)) / 2^53 */
-double k_native_Random_scale53_2(long hi, long lo) {
-    long v = (hi << 27) + (long) (int) lo;
-    return (double) v / 9007199254740992.0;  /* (double)(1L << 53) */
-}

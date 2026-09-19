@@ -9,7 +9,7 @@
 #   TARGET=x86-64 bash scripts/run_tests.sh
 #
 # Кодовете на връщане (k_throw / return 0..) и печатите са документираните
-# baseline стойности от docs/CONTEXT.md (30/30 PASS).
+# baseline стойности от docs/CONTEXT.md (33/33 PASS).
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
@@ -98,6 +98,12 @@ if should_run obj10; then  check obj10    0   "1/2/3/1/2/42/"              examp
 if should_run cflow; then  check cflow    0   "30/2/23/23/22/40/24/33/8/103/3/" examples/cflow.mj; fi
 if should_run exc; then    check exc      3   "10/110/111/7/114/118/518/50/#0/" examples/exc.mj; fi
 if should_run imports; then check imports 0   "12/9/4/10/40/12/"           examples/imports/imports.mj; fi
+if should_run corelib; then
+    check corelib 0 "5/7/3/4/9/1024/-4/4/314/271/42/-7/-12345/-2147483648/2147483647/10/5/-8/2147483647/1234567890123/19/9223372036854775807/-1155869325/431529176/7564655870752979346/207/0/-1465154083/78/48/8/1/[1, 2, 3, 5, 8, 9]/4/-4/[-3, -3]/4/1/1/" examples/corelib.mj
+fi
+if should_run bitop; then
+    check bitop 0 "16/-2147483648/2/1073741824/-4/2147483644/3/65535/-2147483648/1/-1/2147483647/0/0/0/-1/-554899859/0/1/7/6/-6/-1/0/255/-1/0/-1/4/4096/1/1/7/6/0/0/" examples/bitop.mj
+fi
 
 echo ""
 echo "$pass passed, $fail failed"

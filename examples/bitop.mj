@@ -1,0 +1,45 @@
+// P6.1: bitwise + shift operators (свежо в този milestone). Проверява се
+// срещу JDK-семантиката: shift-разстоянието се маскира (&31 / &63), int-ът
+// се промотира, `>>>` е логически, `~`/`^`/`&`/`|` работят на i32/i64,
+// compound-асигнмънтите `<<= >>= >>>= &= |= ^=` връщат стойност.
+class BitOp {
+    static int main() {
+        // ── int shifts: разстоянието се маскира с 0x1F ─────────────────────
+        puti(1 << 4);        puti(1 << 31);
+        puti(1 << 33);       puti(1 << 62);
+        puti(-8 >> 1);       puti(-8 >>> 1);
+        puti(7 >> 33);       puti(-1 >>> 16);
+        puti(1 << -1);       puti(0x1000 >>> 12);
+        puti(-1 >> 1);       puti(-1 >>> 1);
+
+        // ── long shifts: разстоянието се маскира с 0x3F ────────────────────
+        puti((int) (1L << 62));
+        puti((int) (0xFFFFFFFFFFL >>> 40));
+        puti((int) ((0xFFFFFFFFFFL) >> 40));
+        puti((int) ((1L << 48) - 1));
+        puti((int) (0x5DEECE66DL));
+        puti((int) (0x5DEECE66DL >>> 48));
+
+        // ── & | ^ ~ (i32 и i64) ────────────────────────────────────────────
+        puti(5 & 3);         puti(5 | 3);        puti(5 ^ 3);
+        puti(~5);            puti(~0);           puti(0 & -1);
+        puti((int) (0xFFFFFFFFFL & 0xFFL));
+        puti((int) (0xFFFFFFFFFL | 0x100L));
+        puti((int) (0xFFFFFFFFFL ^ 0xFFFFFFFFFL));
+        puti((int) ~0L);
+
+        // ── compound: резултатът е стойност (assignment-as-expression) ────
+        int a = 1;
+        puti(a <<= 2);       a = 65536;
+        puti(a >>= 4);       a = -2147483648;
+        puti(a >>>= 31);     a = 5;
+        puti(a &= 3);        a = 5;
+        puti(a |= 3);        a = 5;
+        puti(a ^= 3);
+        long b = 281474976710655L;
+        puti((int) (b >>>= 48));   b = 1L;
+        puti((int) (b <<= 48));
+
+        return 0;
+    }
+}

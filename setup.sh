@@ -1346,66 +1346,6 @@ cat > tools/phi-elim/README.md <<'EOF'
 EOF
 
 # ═══════════════════════════════════════════════════════════════════
-# tools/emit-x86
-# ═══════════════════════════════════════════════════════════════════
-echo "→ tools/emit-x86"
-mkdir -p tools/emit-x86
-cat > tools/emit-x86/EmitX86Main.java <<'JEOF'
-import java.nio.file.*;
-public class EmitX86Main {
-    public static void main(String[] args) throws Exception {
-        if (args.length < 2) { System.err.println("usage: emit-x86 <in.mir> <out.s> [rules/x86.rule]"); System.exit(1); }
-        String src = args[0].equals("-") ? new String(System.in.readAllBytes()) : Files.readString(Path.of(args[0]));
-        String rf = args.length > 2 ? args[2] : "rules/x86.rule";
-        if (!Files.exists(Path.of(rf))) rf = "../../rules/x86.rule";
-        if (!Files.exists(Path.of(rf))) rf = "../../../rules/x86.rule";
-        Ir.Program p = Ir.Reader.parse(src);
-        String out = Emitter.emit(p, "x86-64", rf);
-        if (args[1].equals("-")) System.out.print(out); else Files.writeString(Path.of(args[1]), out);
-    }
-}
-JEOF
-cat > tools/emit-x86/README.md <<'EOF'
-# emit-x86
-
-Machine IR → x86-64 asm чрез rules/x86.rule.
-
-## Употреба
-
-    emit-x86 <in.mir> <out.s> [rules/x86.rule]
-EOF
-
-# ═══════════════════════════════════════════════════════════════════
-# tools/emit-arm
-# ═══════════════════════════════════════════════════════════════════
-echo "→ tools/emit-arm"
-mkdir -p tools/emit-arm
-cat > tools/emit-arm/EmitArmMain.java <<'JEOF'
-import java.nio.file.*;
-public class EmitArmMain {
-    public static void main(String[] args) throws Exception {
-        if (args.length < 2) { System.err.println("usage: emit-arm <in.mir> <out.s> [rules/arm.rule]"); System.exit(1); }
-        String src = args[0].equals("-") ? new String(System.in.readAllBytes()) : Files.readString(Path.of(args[0]));
-        String rf = args.length > 2 ? args[2] : "rules/arm.rule";
-        if (!Files.exists(Path.of(rf))) rf = "../../rules/arm.rule";
-        if (!Files.exists(Path.of(rf))) rf = "../../../rules/arm.rule";
-        Ir.Program p = Ir.Reader.parse(src);
-        String out = Emitter.emit(p, "arm64", rf);
-        if (args[1].equals("-")) System.out.print(out); else Files.writeString(Path.of(args[1]), out);
-    }
-}
-JEOF
-cat > tools/emit-arm/README.md <<'EOF'
-# emit-arm
-
-Machine IR → ARM64 asm чрез rules/arm.rule.
-
-## Употреба
-
-    emit-arm <in.mir> <out.s> [rules/arm.rule]
-EOF
-
-# ═══════════════════════════════════════════════════════════════════
 # rules/
 # ═══════════════════════════════════════════════════════════════════
 echo "→ rules/"

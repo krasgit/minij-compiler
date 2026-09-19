@@ -254,11 +254,16 @@
 - Останало в P5 (core lib изключения): `NumberFormatException`, `IllegalArgument`,
   `NullPointerException`, `ArrayIndexOutOfBoundsException` — с P6 core library.
 
-## P6 — MiniJ core library (API-огледало на `java.base`)
+## P6 — MiniJ core library (API-огледало на `java.base`) ✅ (done, corelib+bitop; 33/33)
 - **`java.lang`**: System, PrintStream, Object, String, Integer, Long, Math (native→libm).
-- **`java.util`**: Arrays (fill/sort/binarySearch/copyOf/equals/toString), Random (48-bit LCG JDK-съвместим).
-- `corelib/` .mj файлове + `natives.c` + `bin/mc-corelib` build.
-- `docs/corelib.md` contract + `examples/corelib/*.mj` тестове.
+- **`java.util`**: Arrays (fill/sort/binarySearch/copyOf/equals/toString),
+  **Random — чист MiniJ, бит-идентичен с JDK-17** (48-bit LCG + rejection sampling,
+  без natives; root-cause: DCE изтриваше void virtual call-ове → seed 0).
+- Shift/bitwise ops end-to-end: `<< >> >>> & | ^ ~`, &31/&63 masking, compound
+  (`examples/bitop.mj`, JDK-идентичен); `0x…`/`0b…`/underscore literali.
+- `corelib/` .mj файлове + `natives.c` (Random helpers премахнати) + link `-lc -lm` в `mc`.
+- `docs/corelib.md` contract; регресия **33/33 (arm64)** — corelib + bitop в harness
+  с JDK-точни очаквани изходи.
 
 ## P7 — Concurrency (Threads)
 > Широк обем: Thread/Runnable, synchronized, volatile, atomics, `java.util.concurrent` подмножество.

@@ -1,8 +1,9 @@
 // P6: MiniJ core library (corelib/). Демонстрира Math/Integer/Long/Random/
-// Arrays/System — детерминиран stdout (Random(1L) е bit-идентичен с JDK за
-// nextInt()/nextLong()/nextBoolean()/nextDouble(); nextInt(bound) е modulo —
-// документирано отклонение). try/catch остава покрит от exc.mj (P5);
-// тук не го ползваме (EH обхваща излязло от функцията — see corelib.md).
+// Arrays/System — детерминиран stdout. Random(1L) (pure-MiniJ LCG + JDK
+// rejection-sampling в nextInt(bound)) е **бит-идентичен с java.util.Random**
+// за всички черпи след setSeed (проверявано срещу JDK-17 oracle).
+// try/catch остава покрит от exc.mj (P5); тук не го ползваме (EH обхваща
+// излязлото от функцията — see corelib.md).
 
 import java.lang.Math;
 import java.lang.Integer;

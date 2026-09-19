@@ -111,6 +111,43 @@ emit AND_i32(x, y) {
 emit OR_i32(x, y) {
     orr $dst, ${x}, ${y}
 }
+emit XOR_i32(x, y) {
+    eor $dst, ${x}, ${y}
+}
+emit AND_i64(x, y) {
+    and $dst, ${x}, ${y}
+}
+emit OR_i64(x, y) {
+    orr $dst, ${x}, ${y}
+}
+emit XOR_i64(x, y) {
+    eor $dst, ${x}, ${y}
+}
+emit NOT_i32(x) {
+    mvn $dst, ${x}
+}
+emit NOT_i64(x) {
+    mvn $dst, ${x}
+}
+
+emit SHL_i32(x, y) {
+    lsl $dst, ${x}, ${y}
+}
+emit SHR_i32(x, y) {
+    asr $dst, ${x}, ${y}
+}
+emit USHR_i32(x, y) {
+    lsr $dst, ${x}, ${y}
+}
+emit SHL_i64(x, y) {
+    lsl $dst, ${x}, ${y}
+}
+emit SHR_i64(x, y) {
+    asr $dst, ${x}, ${y}
+}
+emit USHR_i64(x, y) {
+    lsr $dst, ${x}, ${y}
+}
 
 emit CMPLT_i32(x, y) {
     cmp ${x}, ${y}

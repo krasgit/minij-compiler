@@ -1324,6 +1324,8 @@ public class AstLowerMain {
         switch (op) {
             case "+=": bin = "+"; break; case "-=": bin = "-"; break;
             case "*=": bin = "*"; break; case "/=": bin = "/"; break; case "%=": bin = "%"; break;
+            case "<<=": bin = "<<"; break; case ">>=": bin = ">>"; break; case ">>>=": bin = ">>>"; break;
+            case "&=": bin = "&"; break; case "|=": bin = "|"; break; case "^=": bin = "^"; break;
             default: throw new RuntimeException("unsupported compound operator: " + op);
         }
         Ir.Value old = readTgt(t, tag(a));
@@ -1331,7 +1333,12 @@ public class AstLowerMain {
         String w = wide(t.t, rv.type);
         Ir.Value ow = w.equals(t.t) ? old : conv(old, w);
         Ir.Value rw = w.equals(rv.type) ? rv : conv(rv, w);
-        Ir.Value res = emit(mapOp(bin), w, ow, rw); res.dbg = tag(a);
+        String bb = mapOp(bin);
+        if (bb.equals("shl") || bb.equals("shr") || bb.equals("ushr")) {
+            Ir.Value m = konst(w.equals("i64") ? 63 : 31, w, tag(a)); m.dbg = tag(a);
+            rw = emit("and", w, rw, m); rw.dbg = tag(a);
+        }
+        Ir.Value res = emit(bb, w, ow, rw); res.dbg = tag(a);
         Ir.Value fin = w.equals(t.t) ? res : conv(res, t.t);
         fin.dbg = tag(a);
         writeTgt(t, fin, tag(a));
@@ -1809,7 +1816,7 @@ if (e == null) return konst(0, "i32", -1);
             String vs = lit.value;
             boolean isL = vs.endsWith("L") || vs.endsWith("l");
             if (isL) vs = vs.substring(0, vs.length()-1);
-            return konst(Long.parseLong(vs), isL ? "i64" : "i32", tag(e));
+            return konst(parseLongSmart(vs), isL ? "i64" : "i32", tag(e));
         }
         if (e instanceof Java.FloatingPointLiteral lit)
             return konst(Double.doubleToRawLongBits(Double.parseDouble(String.valueOf(get(lit, "value")))), "f64", tag(e));
@@ -1939,6 +1946,10 @@ if (e == null) return konst(0, "i32", -1);
             String w = wide(l.type, r.type);
             if (!w.equals("i32")) { l = conv(l, w); r = conv(r, w); }
             String base = mapOp(b.operator);
+            if (base.equals("shl") || base.equals("shr") || base.equals("ushr")) {
+                Ir.Value m = konst(w.equals("i64") ? 63 : 31, w, tag(b)); m.dbg = tag(b);
+                r = emit("and", w, r, m); r.dbg = tag(b);
+            }
             boolean cmp = base.startsWith("cmp");
             Ir.Value v = emit(base, cmp ? "i32" : w, l, r); v.dbg = tag(b); return v;
         }
@@ -1950,6 +1961,7 @@ if (e == null) return konst(0, "i32", -1);
                 Ir.Value v = emit("sub", a.type, z, a); v.dbg=tag(u); return v;
             }
             if (u.operator.equals("!")) { Ir.Value v = emit("cmpeq","i32",a,konst(0,"i32",tag(u))); v.dbg=tag(u); return v; }
+            if (u.operator.equals("~")) { Ir.Value v = emit("not", a.type, a); v.dbg=tag(u); return v; }
         }
         if (e instanceof Java.Instanceof io) {
             String tc = norm(getStr(io, "rhs"));
@@ -2148,6 +2160,8 @@ if (e == null) return konst(0, "i32", -1);
         switch (op) {
             case "+": return "add"; case "-": return "sub"; case "*": return "mul";
             case "/": return "div"; case "%": return "mod";
+            case "<<": return "shl"; case ">>": return "shr"; case ">>>": return "ushr";
+            case "&": return "and"; case "|": return "or"; case "^": return "xor";
             case "<": return "cmplt"; case ">": return "cmpgt";
             case "<=": return "cmple"; case ">=": return "cmpge";
             case "==": return "cmpeq"; case "!=": return "cmpne";

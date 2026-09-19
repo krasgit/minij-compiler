@@ -56,7 +56,8 @@ public class Opt {
             if (Ir.isTerm(v.op) || v.op.startsWith("PHI_") || v.op.equals("phi")
                 || v.op.equals("store") || v.op.equals("STORE_i32")
                 || v.op.startsWith("st_") || v.op.equals("chk")
-                || v.op.equals("call") || v.op.startsWith("CALL_")) used.add(v);
+                || v.op.equals("call") || v.op.startsWith("CALL_")
+                || v.op.equals("icall") || v.op.startsWith("ICALL_")) used.add(v);
         boolean ch = true;
         while (ch) { ch = false;
             for (Ir.Block b : f.blocks) for (Ir.Value v : b.ins) if (used.contains(v))

@@ -34,6 +34,11 @@ public class SsaLowerMain {
             else if (o.equals("cmpne")) v.op = "CMPNE_" + s;
             else if (o.equals("and")) v.op = "AND_" + s;
             else if (o.equals("or"))  v.op = "OR_" + s;
+            else if (o.equals("xor")) v.op = "XOR_" + s;
+            else if (o.equals("shl")) v.op = "SHL_" + s;
+            else if (o.equals("shr")) v.op = "SHR_" + s;
+            else if (o.equals("ushr")) v.op = "USHR_" + s;
+            else if (o.equals("not")) v.op = "NOT_" + s;
             else if (o.equals("jump")) v.op = "JMP";
             else if (o.equals("branch")) v.op = "BRANCH";
             else if (o.equals("return")) { if (f.retType.equals("void")) v.op = "return"; else v.op = "RETURN_" + s; }

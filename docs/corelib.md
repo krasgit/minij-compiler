@@ -6,6 +6,9 @@
 ## Статус
 - **DRAFT код** — файловете под `corelib/` не се компилират още от MiniJ (изчакват фазите, посочени в header-а им).
 - Целта на draft-а: фиксира API повърхността, `@native` ABI-то и редът на включване, за да диктува дизайна на P0–P5.
+- **АКТУАЛНО (P6/M8, DONE):** `examples/corelib.mj` компилира и върви в harness
+  (`scripts/run_tests.sh`, 33/33). Long/Integer/Math/Arrays/System **bit-точни vs JDK-17**;
+  **Random — бит-идентичен с JDK-17** (чист MiniJ, без natives).
 
 ## Файлове
 | Файл | Клас | Изисква фаза |
@@ -37,18 +40,24 @@
   `round(float|double)`, `PI`, `E`, `random()` (през Random).
 - **Arrays**: `fill(5 типа)`, `sort(int[]|long[])` (quicksort, ascending), `binarySearch` (контракт `-(insertionPoint)-1`),
   `copyOf(4 типа)`, `equals(int[]|long[])`, `toString(int[]|long[])`.
-- **Random**: JDK-идентичен 48-bit LCG (`0x5DEECE66D`/`0xB`) — **бит-съвместим** с JDK;
-  `nextInt()/nextInt(bound)/nextLong()/nextFloat()/nextDouble()/nextBoolean()/setSeed(long)`.
+- **Random**: JDK-идентичен 48-bit LCG (`0x5DEECE66D`/`0xB`) — **бит-идентичен с JDK-17**
+  от `Random(1L)` (проверено с oracle). Чист MiniJ (маската `0xFFFFFFFFFFFF` = литерал
+  `281474976710655L`), **без natives**; `nextInt(bound)` = JDK rejection sampling;
+  `nextInt()/nextLong()/nextFloat()/nextDouble()/nextBoolean()/setSeed(long)`.
 
 ## Отворени места (TODO)
-- **P5**: `parseInt/parseLong` и `nextInt(bound)` трябва да `throw` (`NumberFormatException`/`IllegalArgumentException`)
-  — сега placeholder (частичен резултат + спиране на невалиден char).
+- **P5**: `parseInt/parseLong` throw-ват `NumberFormatException` при невалиден char
+  (напр. празен низ/'_' след '0x'); невалиден `nextInt(bound)`/`setSeed` — `IllegalArgumentException`
+  контрактът се покрива само частично.
 - **P3**: `Object.toString()` разчита на class table (`Object.typeName`) + identity hash.
-- **P1**: `long >>>`, `1L`/`0x…L` literali, FP ops — без тях `Long/Random/Arrays(long)` не компилират.
+- **FP (M8-T1 ост.)**: `Math.exp/log/sin/cos/tan` (native→libm) — не-блокер за P6;
+  някой от clip-адъра на libm не е в harness отделно.
 
 ## Тестове (когато тръгнат)
 - `examples/corelib/*.mj` + `run_tests.sh` — очакван печат.
 - Random: фиксиран seed срещу известна JDK-референция (бит-съвместимост).
+  **DONE** — `examples/corelib.mj` (8 draw-а + `nextInt(bound)`) и `examples/bitop.mj`
+  (shift/bitwise) са бит-идентични с JDK-17 oracle (в harness, 33/33).
 - Edge-case: `parseInt` невалиден вход (P5), `binarySearch` точка на вмъкване, `trim`/`replace`.
 
 ## P7 — Thread/Concurrency core lib (по-нататък)
