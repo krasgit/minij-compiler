@@ -19,8 +19,8 @@ Resume instructions: kогато потребителят напише "continue
 ## Objective (текуща посока)
 
 Проект: Mini-Java compiler (Janino AST → SSA/IR → regalloc → arm64/x86 asm), roadmap
-P0..P8 (P3 = обекти е следващата голяма фаза). Всеки милстон = functionality + пример +
-regression + docs + commit + push.
+P0..P10 (P6 core lib = DONE; P3.5 GC е следващият голям риск/кандидат). Всеки милстон =
+функциональност + пример + regression + docs + commit + push.
 
 ## Environment / workflow constants (НЕ променяй!)
 
@@ -56,8 +56,10 @@ regression + docs + commit + push.
   `static void main` (обj10; 28/28)** → **`be8233d` P4 control flow (cflow; 29/29)**
   → **`961995e` P5 exceptions (exc; 30/30)**
   → **`60c6ddb` import/packages (imports; 31/31; harness `scripts/run_tests.sh`; `-no-pie` link)**
+  → **`31db14d` P6 corelib ядро (natives.c + `-lm`, param-width fix, `.statics` init)**
+  → **`2955350` P6 corelib DONE: shift/bitwise ops + Random бит-идентичен с JDK (33/33)**
 
-## Status (актуално към HEAD = 60c6ddb, регресия 31/31)
+## Status (актуално към HEAD = 2955350, регресия 33/33)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
@@ -87,8 +89,9 @@ regression + docs + commit + push.
   identity-seen цикъл-guard), пакетен префикс се нормира експлицитно (`norm()`), source root-ове
   през `-I dir`/`--src d1:d2` на `ast-lower` (и `-I` в `mc`); `mc` линква с `-no-pie`.
   Test harness: `scripts/run_tests.sh` (31 теста, arm64 нативен/qemu)**.
-- ACTIVE: Packages + import **завършени** (31/31). Следва P3.5 GC или P6 core lib (виж NEXT MOVE).
-- Regression: **31/31 PASS на arm64** (scripts/run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+- ACTIVE: Packages + import **завършени** (31/31); **P6 corelib DONE (33/33)**.
+  Следва P3.5 GC или избор на GC решение (виж NEXT MOVE).
+- Regression: **33/33 PASS на arm64** (scripts/run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
   str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
   **obj** (`5/7/6/12`, `1/2/3/1`, exit 2),
@@ -103,23 +106,53 @@ regression + docs + commit + push.
   **obj10** (`1/2/3/1/2/42`, exit 0),
   **cflow** (`30/2/23/23/22/40/24/33/8/103/3`, exit 0),
   **exc** (`10/110/111/7/114/118/518/50`, exit 3 — uncaught),
-  **imports** (`12/9/4/10/40/12`, exit 0 — packages/static import).
+  **imports** (`12/9/4/10/40/12`, exit 0 — packages/static import),
+  **corelib** (JDK-точни числа от `Random(1L)`: `-1155869325/431529176/…`; exit 0),
+  **bitop** (36 стойности, JDK oracle-идентични; exit 0).
 
 ## NEXT MOVE (при "continue")
 
-**Packages + import е завършен** (examples/imports/imports.mj; 31/31) → следва избор между:
+**P6 corelib (M8) е завършен** (examples/corelib.mj + examples/bitop.mj; **33/33**) →
+следва избор между:
 1. **P3.5 GC решение** — паметта е arena/без free-ване от P0; GC (mark-sweep по vtables/header
    seam от P3) е големият риск за P6+ (core lib обекти/контейнери, P7 threads).
    Решение: (A) ръчен conservative mark&sweep по stack scan или (B) MMTk binding.
-   Seam-ът (header class index + pad, `mm_alloc`) е готов от P3.
-2. **P6 MiniJ core library** — java.lang (System/PrintStream/Object/String/Integer/Long/Math),
-   java.util (Arrays/Random), `corelib/` .mj + `natives.c` + `docs/corelib.md`; включва core
-   Exception klасове (NumberFormat/IllegalArgument/NullPointer/ArrayIndexOutOfBounds) за P5.
+   Seam-ът (header class index + pad, `mm_alloc`) е готов от P3. **Също така реши 16KB
+   bump-arena OOM (M3.5-T1)** — дългите низови run-ове пак рискуват (3.5 бъг, жив).
+2. **M8 остатък (не-блокер)**: Math `exp/log/sin/cos/tan` natives; `parseInt/parseLong`
+   пълни `NumberFormatException`-и; MiniF оставен настрана.
 
 Цикъл: frontend → rules (ако нови ops) → пример (`examples/*.mj`) → `scripts/run_tests.sh`
-(31/31→N/N) → README/ROADMAP/CONTEXT → комит+push.
+(33/33→N/N) → README/ROADMAP/CONTEXT → комит+push.
 
 ## Pipelines-факти (проверени, няма нужда да се преоткриват)
+
+### P6 — shift/bitwise ops, literali, Random, DCE (проверено в този milestone)
+- **Shift/bitwise оператори (M8-T1, всички работи end-to-end)**: frontend
+  `mapOp` добавя `<<`→`shl`, `>>`→`shr`, `>>>`→`ushr`, `&`→`and`, `|`→`or`, `^`→`xor`;
+  unary `~`→`not`; **shift-дистанцията се маскира** с `&63` (i64) / `&31` (i32) и в
+  `expr(BinaryOperation)`, и в `assignVal` (compound); compound `<<= >>= >>>= &= |= ^=`.
+  SsaLower: XOR_/SHL_/SHR_/USHR_/NOT_ suffix. Rules: `arm.rule` — lsl/asr/lsr, eor, mvn,
+  and/or; `x86.rule` — shl/sar/shr `%cl` (i32 `movl %eax,%ebx` dance + i64), andq/orq/xorq/notq.
+- **IntegerLiteral hex/bin/underscore (bugfix)**: `expr(IntegerLiteral)` ползваше
+  `Long.parseLong` → `0x1000` фърляше `NumberFormatException`. Сега ползва съществуващия
+  `parseLongSmart` (hex `0x`, oct `0`, bin `0b`, underscores) — пътят е общ (`int` и `long`
+  литерали), както и `constNumericInit` в `.statics`.
+- **Детерминирана DCE root (bugfix, ВАЖНО)**: `common/Opt.java` root-ваше `call`/`CALL_*`,
+  но НЕ `icall`/`ICALL_*` → **void-виртуални call-ове като dead code се изтриваха**.
+  Реалният случай: `Random()` ctor-а вика виртуалния `setSeed(seed)` (void) → DCE го
+  махаше → seed оставаше 0 и `nextInt()` даваше `0` вместо JDK-ското `-1155869325`.
+  Fix: `icall` + `ICALL_*` са rooted. Симптом ако се счупи пак: ctor с side-effect
+  виртуален call се смалява до празно тяло (8 icalls → 7 в opt.ssa).
+- **Random = чист MiniJ (финален)**: `corelib/java/util/Random.mj` — JDK LCG
+  `nextSeed = (seed*0x5DEECE66D+0xB) & 281474976710655L` (маската е **литерал** — static
+  const-fold на `(1L<<48)-1` не се прави), `>>>`-read-ове за bit extraction, `nextInt(bound)`
+  = **JDK rejection sampling** (не modulo). **Бит-идентичен с JDK-17** от `Random(1L)`:
+  `-1155869325/431529176/7564655870752979346/207/0/-1465154083/78/48`. Random natives-ите
+  (RMULT/RADD/RMASK, k_native_Random_*) са ПРЕМАХНАТИ от `runtime/natives.c`.
+- **Emitter i32 const с бит 31 (потвърдено)**: `movz/movk` 16-bit половинки (цикличния
+  `(x & 0xFFFF)` / shift) handle-т отрицателни i32 константи коректно — bitop 32-bit
+  изходи (напр. `-2147483648`) мачават JDK.
 
 ### Janino AST (верни, supersede по-стари предположения)
 - **P3 classes shapes**: `class Foo { int x; long w; String s; }` — класовите полета се взимат
@@ -371,9 +404,10 @@ regression + docs + commit + push.
 
 ## Testing
 
-- `bash scripts/run_tests.sh` (от repo-root; self-contained) → build + **31/31** теста
+- `bash scripts/run_tests.sh` (от repo-root; self-contained) → build + **33/33** теста
   (arm64 нативен хост или qemu-aarch64 с `-L /usr/aarch64-linux-gnu`; `--only=<name>` филтър).
-  (Може да отнеме >2 мин — таймаут-ът на bash tool трябва да е ~400s.)
+  (Може да отнеме >2 мин — таймаут-ът на bash tool трябва да е ~400s; на тази машина
+  ~1 min на native aarch64.)
 - Тест за нов пример = добавяне на `check <name> <exitcode> $'expected\ndata\n' <src>`
   в `scripts/run_tests.sh` + обновяване на броя и README/ROADMAP/CONTEXT.
 - Примерни файлове за multi-D: `examples/md.mj`. OOB multi-D (m7/m8 .mj в /tmp/opencode) → exit 134.
@@ -409,10 +443,13 @@ regression + docs + commit + push.
   **P4: labelBreak/labelCont карти, stmt() диспеч по While/Do/For/ForEach/Labeled, helpers
   doWhileStmt/doStmt/forStmt(lbl)/forEachStmt, scAndOr (&&/||), assignVal/Tgt/tgtFor/readTgt/
   writeTgt (compound += -= *= /= %=), crementVal (++/--), MethodInvocation args-eval bugfix**;
+  **P6: mapOp << >> >>> & | ^ ~ + shift модели с &63/&31, compound bitwise, IntegerLiteral →
+  parseLongSmart (hex/oct/bin/underscore)**;
   **import: main `-I/--src` parsing, addUnit/loadClosure/processImports/loadClassFile/loadFromPath/
   findFile/resolveRefs/onDemandPkgs, walkRefs (reflection, seen-guard), norm() (mapType/irType/
   elemOf/signatures/locals/cast/instanceof/new/array/try-catch), importedStaticField{,Load,Jt}/
   importedStaticMethod (read/write/infer), curUnit**).
+- `common/Opt.java` — DCE; **root-ва `icall`/`ICALL_*` (P6 bugfix)**.
 - `common/Emitter.java` — spill support (spillTemp/spillBytes/stemp/slotMem/spillLoad/spillStore/
   prepareSpills/saveSpills/maxSpillBytes), x86 ptr→movq, template interpreter + Ctx,
   **`${cargs}` loop-list (base=1), vtables в `.data` (R_AARCH64_RELATIVE → не .rodata),
@@ -426,19 +463,25 @@ regression + docs + commit + push.
   `chk`, `lea_i32/i64/f64/ptr`/`lea_field`, `ld_i32/i64/f64/ptr`, `st_i32/i64/f64/ptr`,
   CONST/MOV/ADD/…, **`return` (void: arm `mov x0, #0; b exit` / x86 `movl $0, %eax; jmp exit`)**
   , **`vt_ref`/`ICALL_i32/i64/f64` (`${cargs}`)**,
-  **`lea_static` (${name}: adrp/add :lo12 / leaq sym(%rip))**, prologue/epilogue.
+  **`lea_static` (${name}: adrp/add :lo12 / leaq sym(%rip))**, prologue/epilogue,
+  **P6: SHL/SHR/USHR/XOR/NOT/AND/OR (i32+i64), `${imov}` 32-bit wrap**.
 - `runtime/runtime.c`, `runtime/crt0.S` — k_* helpers (`k_print/k_println`, `k_print_i32/
   k_println_i32`, `k_newline`, **`k_string_equals`/`k_string_concat`**), mm_alloc, syscalls.
+  `runtime/natives.c` — System/Math natives само (Random natives-ите са премахнати).
 - `examples/*.mj` — hello, gcd, fib, forloop, dowhile, ternary, switch, print, dbl, lng, mix,
   arrays, oob, str, str2, md, str3, obj, obj2, **obj3**, **obj4**, **obj5**, **obj6**,
   **obj7**, **obj8**, **obj9**, **obj10**, **cflow**, native, **imports/** (imports.mj +
-  geom/Geom.mj + shapes/{Shape,Circle,Square}.mj).
-- `scripts/run_tests.sh` — regression harness (31 теста; бивши `/tmp/opencode/run_tests.sh`
+  geom/Geom.mj + shapes/{Shape,Circle,Square}.mj), **corelib.mj**, **bitop.mj**.
+- `corelib/java/util/Random.mj` — чист MiniJ LCG (маска-литерал `281474976710655L`,
+  rejection sampling), JDK bit-идентичен.
+- `scripts/run_tests.sh` — regression harness (33 теста; `check corelib 0 "<JDK-точни>"` +
+  `check bitop 0 "<oracle>"`; бивши `/tmp/opencode/run_tests.sh`
   беше с corrupt-edit — `run_out` без `}`/без `got=$?`, орязани expected-out за dbl/arrays/md;
   вече е в repo, self-contained, `TARGET` env (arm64), `--only=<name>`).
 - `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD/SE/**OProbe**/OProbe2/OProbe3/**StProbe**/
-  StProbe2/StProbe3/StProbe4/**SupProbe**/SupProbe2/SupProbe3/SupProbe4) — Janino AST probes,
-  преизползваеми.
+  StProbe2/StProbe3/StProbe4/**SupProbe**/SupProbe2/SupProbe3/SupProbe4, **BitOpOracle**,
+  **r/R.java**) — Janino AST probes, преизползваеми. `/tmp/opencode/oracle.txt` — JDK oracle
+  за `examples/bitop.mj` (36 стойности).
 - `README.md`, `docs/ROADMAP.md`, `docs/ir-format.md`, `docs/rule-format.md`, `docs/corelib.md`.
 
 ## При съмнение

@@ -388,7 +388,7 @@ M0 (docs sync, PARTIAL) → M3.6 (P2.5 import ✅) → M3.5 (runtime-памет)
 
 _Формат:_ `дата | milestone | HEAD | regression | commit`
 
-- `2026-09-19 | P6 corelib (M8, DONE — shift/bitwise ops, Random bit-exact JDK, bitop) | 31db14d → нов | 33/33 | <нов commit>`
+- `2026-09-19 | P6 corelib (M8, DONE — shift/bitwise ops, Random bit-exact JDK, bitop) | 31db14d → 2955350 | 33/33 | 2955350`
 - `2026-09-18 | P2.5 packages/import (M3.6, DONE) | 60c6ddb | 31/31 | 60c6ddb`
 - `2026-09-18 | P5 exceptions (M7, DONE) | 961995e | 30/30 | 961995e`
 - `2026-09-18 | P4 control flow (M6, DONE) | be8233d | 29/29 | be8233d`
