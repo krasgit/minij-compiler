@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>bg.minij</groupId>
+    <artifactId>minij-parent</artifactId>
+    <version>1.0</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>minij-corelib</artifactId>
+  <packaging>pom</packaging>
+
+  <name>MiniJ corelib library</name>
+  <description>
+    Prebuilt core library: target/libminijcore.a (static; dynamic .so идва с PIC
+    emission) и target/classmap.txt (stable class-index mapping за --corelib=lib
+    режима на driver-а — обектите пазят class index в header-а, така че app-ът
+    трябва да възпроизведе същото номериране).
+  </description>
+
+  <dependencies>
+    <!-- само за reactor-ordering: driver-ът (и transitively tools/ast-lower) трябва
+         да е компилиран преди generate-resources на corelib. -->
+    <dependency>
+      <groupId>bg.minij</groupId>
+      <artifactId>minij-driver</artifactId>
+      <version>${minij.version}</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.1.0</version>
+        <executions>
+          <execution>
+            <id>build-corelib-libs</id>
+            <phase>generate-resources</phase>
+            <goals><goal>exec</goal></goals>
+            <configuration>
+              <executable>bash</executable>
+              <arguments>
+                <argument>${project.basedir}/build-libs.sh</argument>
+                <argument>${project.build.directory}</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

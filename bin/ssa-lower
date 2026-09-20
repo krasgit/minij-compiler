@@ -1,4 +1,3 @@
 #!/usr/bin/env bash
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
-CP="$DIR/out:$DIR/lib/janino.jar:$DIR/lib/commons-compiler.jar"
-exec java -cp "$CP" SsaLowerMain "$@"
+exec java -cp "$DIR/dist/target/minij-compiler.jar" bg.minij.tools.ssa_lower.SsaLowerMain $@ 

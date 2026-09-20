@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>bg.minij</groupId>
+    <artifactId>minij-parent</artifactId>
+    <version>1.0</version>
+  </parent>
+
+  <artifactId>minij-tools</artifactId>
+  <packaging>pom</packaging>
+
+  <name>MiniJ tools</name>
+  <description>Агрегатор на 8-те tool модула на компилатора.</description>
+
+  <modules>
+    <module>janino-parse</module>
+    <module>ast-lower</module>
+    <module>ssa-build</module>
+    <module>ssa-opt</module>
+    <module>ssa-lower</module>
+    <module>regalloc</module>
+    <module>phi-elim</module>
+    <module>emit</module>
+  </modules>
+</project>

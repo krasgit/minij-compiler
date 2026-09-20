@@ -404,7 +404,9 @@ emit chk(a, i) {
     sxtw x9, ${i}
     ldr x10, [${a}]
     cmp x10, x9
-    b.ls k_bounds_error
+    b.hi 9f
+    bl k_bounds_error
+9:
 }
 emit lea_i32(a, i) {
     sxtw x9, ${i}

@@ -30,7 +30,7 @@ done
 [ -n "$JAVA_HOME" ] || { echo "error: JDK 17+ не е намерен (javac на PATH)"; exit 2; }
 export PATH="$JAVA_HOME/bin:$PATH"
 
-[ -x "out/AstLowerMain.class" ] || bash ./build.sh >/dev/null
+[ -f "dist/target/minij-compiler.jar" ] || bash ./build.sh >/dev/null
 
 HOST_ARCH="$(uname -m)"
 RUN=()
@@ -46,9 +46,11 @@ trap 'rm -rf "$WORK"' EXIT
 pass=0; fail=0
 
 check() {
-    local name="$1" exp_rc="$2" exp_out="$3" src="$4"
+    local name="$1" exp_rc="$2" exp_out="$3" src="$4" xtra="${5:-}"
     local bin="$WORK/$name"
-    if ! ( cd "$REPO" && timeout 180 ./mc --target="$TARGET" "$src" -o "$bin" ) >/dev/null 2>&1; then
+    local mcargs=()
+    [ -n "$xtra" ] && read -ra mcargs <<< "$xtra"
+    if ! ( cd "$REPO" && timeout 180 ./mc --target="$TARGET" "${mcargs[@]}" "$src" -o "$bin" ) >/dev/null 2>&1; then
         echo "  FAIL $name (compile)"; fail=$((fail+1)); return
     fi
     local rc out
@@ -100,6 +102,11 @@ if should_run exc; then    check exc      3   "10/110/111/7/114/118/518/50/#0/" 
 if should_run imports; then check imports 0   "12/9/4/10/40/12/"           examples/imports/imports.mj; fi
 if should_run corelib; then
     check corelib 0 "5/7/3/4/9/1024/-4/4/314/271/42/-7/-12345/-2147483648/2147483647/10/5/-8/2147483647/1234567890123/19/9223372036854775807/-1155869325/431529176/7564655870752979346/207/0/-1465154083/78/48/8/1/[1, 2, 3, 5, 8, 9]/4/-4/[-3, -3]/4/1/1/" examples/corelib.mj
+fi
+# corelib като предварително компилирана библиотека (--corelib=lib): същите
+# outputs като inline-а (bit-identical Random и в двата режима).
+if should_run librun; then
+    check librun 0 "5/7/3/4/9/1024/-4/4/314/271/42/-7/-12345/-2147483648/2147483647/10/5/-8/2147483647/1234567890123/19/9223372036854775807/-1155869325/431529176/7564655870752979346/207/0/-1465154083/78/48/8/1/[1, 2, 3, 5, 8, 9]/4/-4/[-3, -3]/4/1/1/" examples/corelib.mj "--corelib=lib"
 fi
 if should_run bitop; then
     check bitop 0 "16/-2147483648/2/1073741824/-4/2147483644/3/65535/-2147483648/1/-1/2147483647/0/0/0/-1/-554899859/0/1/7/6/-6/-1/0/255/-1/0/-1/4/4096/1/1/7/6/0/0/" examples/bitop.mj

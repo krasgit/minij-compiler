@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>bg.minij</groupId>
+    <artifactId>minij-parent</artifactId>
+    <version>1.0</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>minij-driver</artifactId>
+  <name>MiniJ driver</name>
+  <description>
+    DriverMain — клас-диригент, който оркестрира всичките 8 tools in-process
+    (CLI-съвместим с mc) и извършва assemble/link с външните as/gcc.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>bg.minij</groupId>
+      <artifactId>minij-tool-janino-parse</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>bg.minij</groupId>
+      <artifactId>minij-tool-ast-lower</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>bg.minij</groupId>
+      <artifactId>minij-tool-ssa-build</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>bg.minij</groupId>
+      <artifactId>minij-tool-ssa-opt</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>bg.minij</groupId>
+      <artifactId>minij-tool-ssa-lower</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>bg.minij</groupId>
+      <artifactId>minij-tool-regalloc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>bg.minij</groupId>
+      <artifactId>minij-tool-phi-elim</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>bg.minij</groupId>
+      <artifactId>minij-tool-emit</artifactId>
+    </dependency>
+  </dependencies>
+</project>
