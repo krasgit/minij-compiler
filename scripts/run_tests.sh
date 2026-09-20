@@ -50,7 +50,7 @@ check() {
     local bin="$WORK/$name"
     local mcargs=()
     [ -n "$xtra" ] && read -ra mcargs <<< "$xtra"
-    if ! ( cd "$REPO" && timeout 180 ./mc --target="$TARGET" "${mcargs[@]}" "$src" -o "$bin" ) >/dev/null 2>&1; then
+    if ! ( cd "$REPO" && timeout 180 bash mc --target="$TARGET" "${mcargs[@]}" "$src" -o "$bin" ) >/dev/null 2>&1; then
         echo "  FAIL $name (compile)"; fail=$((fail+1)); return
     fi
     local rc out
