@@ -24,11 +24,23 @@ P0..P10 (P6 core lib = DONE; P3.5 GC е следващият голям риск
 
 ## Environment / workflow constants (НЕ променяй!)
 
-- Repo: `/shared/compiler` — **noexec mount**: `./bin/*`, `build.sh`, `test.sh` не вървят там.
-- Build: `bash /shared/compiler/build.sh` (създава `/shared/compiler/out`).
-- Tests/run: **`scripts/run_tests.sh`** от repo-root (arm64 нативен или qemu-aarch64
-  `-L /usr/aarch64-linux-gnu`); /tmp/opencode е само за еднократни probes/edge-тестове.
-- CP: `$DIR/out:$DIR/lib/janino.jar:$DIR/lib/commons-compiler.jar`; RULE=`$DIR/rules/arm.rule`.
+- Repo: `/shared/compiler` — **noexec mount, .sh без x-бит**: всичко се вика през `bash`
+  (`bash setup.sh` / `bash test.sh` / `bash mc`); работното/exec копие е `/tmp/opencode/mvnwork`
+  (същия Maven reactor, синхронизира се след промени).
+- Build: `bash build.sh` = `mvn -DskipTests package` (Maven multi-module reactor: common, tools/*,
+  driver, dist, runtime, corelib) → shaded **`dist/target/minij-compiler.jar`**; `mc` обвива
+  `java -cp dist/target/minij-compiler.jar bg.minij.driver.DriverMain`.
+- Tests/run: **`bash test.sh`** (делегира към `bash scripts/run_tests.sh`; arm64 нативен или
+  qemu-aarch64 `-L /usr/aarch64-linux-gnu`; бинарите излизат в `${TMPDIR:-/tmp}` — не в repo);
+  /tmp/opencode е само за еднократни probes/edge-тестове.
+- Prebuilt libs (изграждат се от `mvn package` през exec-maven-plugin `build-libs.sh`:
+  `runtime/target/libruntime.{a,so}` (runtime.c+natives.c) и `corelib/target/libminijcore.a` +
+  `classmap.txt`; **`.so` corelib N/A** — Emitter-ът адресира глобални данни non-PIC (adrp),
+  ld отказва в shared object). `--link=static|dynamic` (libruntime), `--corelib=lib` (аpp-ът
+  фиксира клас-индексите по classmap и резолва corelib символите външно).
+- RULE=`$DIR/rules/arm.rule` (и x86.rule). Bounds-check `chk` → local `9f` + `bl k_bounds_error`
+  (call, не condbr → резолвира се и при dynamic/shared); иначе app с масиви + `--link=dynamic`
+  гърмеше с „unresolvable R_AARCH64_CONDBR19".
 - Pipeline (по ред): `JaninoParseMain` → `AstLowerMain`(.lir) → `SsaBuildMain`(.ssa) →
   `SsaOptMain`(.opt.ssa) → `SsaLowerMain`(.mir) → `RegallocMain .mir .alloc.mir --target=arm64 $RULE`
   → `PhiElimMain`(.final.mir) → `EmitMain .final.mir .s --target=arm64 $RULE` → `as`+`ld`+run.
@@ -58,8 +70,10 @@ P0..P10 (P6 core lib = DONE; P3.5 GC е следващият голям риск
   → **`60c6ddb` import/packages (imports; 31/31; harness `scripts/run_tests.sh`; `-no-pie` link)**
   → **`31db14d` P6 corelib ядро (natives.c + `-lm`, param-width fix, `.statics` init)**
   → **`2955350` P6 corelib DONE: shift/bitwise ops + Random бит-идентичен с JDK (33/33)**
+  → **`4f847e3` Maven reactor + DriverMain + runtime/corelib prebuilt libs (34/34, pushed)**
+  → **`21e1a6e` test.sh → scripts/run_tests.sh; `bash mc` (noexec-friendly, pushed)**
 
-## Status (актуално към HEAD = 2955350, регресия 33/33)
+## Status (актуално към HEAD = 21e1a6e, регресия 34/34)
 
 - DONE: P0 infra; P1 long/double + native; P2 arrays; P2 String/char/System.out;
   **P2 multi-D arrays (17/17 regression, pushed)**; **P2 String.equals/concat
@@ -89,9 +103,22 @@ P0..P10 (P6 core lib = DONE; P3.5 GC е следващият голям риск
   identity-seen цикъл-guard), пакетен префикс се нормира експлицитно (`norm()`), source root-ове
   през `-I dir`/`--src d1:d2` на `ast-lower` (и `-I` в `mc`); `mc` линква с `-no-pie`.
   Test harness: `scripts/run_tests.sh` (31 теста, arm64 нативен/qemu)**.
-- ACTIVE: Packages + import **завършени** (31/31); **P6 corelib DONE (33/33)**.
-  Следва P3.5 GC или избор на GC решение (виж NEXT MOVE).
-- Regression: **33/33 PASS на arm64** (scripts/run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
+- DONE: **Maven reactor + DriverMain + prebuilt libs (T1-T3; 34/34, `4f847e3` + `21e1a6e`, pushed)**:
+  multi-module (common/tools/*/driver/dist/runtime/corelib), shaded `dist/target/minij-compiler.jar`
+  (Main-Class bg.minij.driver.DriverMain), `--stage{as,li,ss,sa,fin,em,as}`-flags +
+  `--keep/-o/-I/--emit-classmap/--classmap/--externals/--external-dir`, `--link=static|dynamic`
+  (libruntime.a/.so), `--corelib=lib` (libminijcore.a + classmap.txt; vtable-индексите са
+  compile-time константа → output-ът е бит-идентичен с inline corelib: corelib/str/md/print/exc/
+  obj10/cflow); bounds-check fix `bl k_bounds_error` (call) → **dynamic линк работи и с масиви**;
+  `test.sh`→`scripts/run_tests.sh`, `bash mc` (noexec). **T4 (dynamic libminijcore.so) deferred**:
+  Emitter-ът emitting non-PIC `adrp/add` + ld „dangerous relocation" — пътят е документиран в
+  `corelib/build-libs.sh`.
+- ACTIVE: **Repo hygiene (Step A, в процес)**: нов `setup.sh` (bash-chain: JDK/mvn check →
+  `bash build.sh` → `bash test.sh`), README.md обновен (Maven/`bash mc`/--link/--corelib/34 теста),
+  CONTEXT.md — този файл, `git rm` stale `.idea/**` + `*.iml`, `.gitignore` += `.idea/`, `*.iml`.
+  След това: commit+push. (Опционално B: dynamic-регресионни кейсове; C: JUnit; D: T4 .so.)
+  След това отново: **P3.5 GC или избор на GC решение** (виж NEXT MOVE).
+- Regression: **34/34 PASS на arm64** (bash test.sh / scripts/run_tests.sh): hello 47, gcd 12, fib 55, forloop 55,
   dowhile 55, ternary 5, switch 92, print, dbl, lng, mix, arrays, oob 134, str, str2, md, native(-lc),
   str3 (`1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1`),
   **obj** (`5/7/6/12`, `1/2/3/1`, exit 2),
@@ -108,16 +135,27 @@ P0..P10 (P6 core lib = DONE; P3.5 GC е следващият голям риск
   **exc** (`10/110/111/7/114/118/518/50`, exit 3 — uncaught),
   **imports** (`12/9/4/10/40/12`, exit 0 — packages/static import),
   **corelib** (JDK-точни числа от `Random(1L)`: `-1155869325/431529176/…`; exit 0),
-  **bitop** (36 стойности, JDK oracle-идентични; exit 0).
+  **bitop** (36 стойности, JDK oracle-идентични; exit 0),
+  **librun** (същия corelib output през `--corelib=lib` — предварително компилирана
+  `libminijcore.a` + `classmap.txt`; 34/34).
 
 ## NEXT MOVE (при "continue")
 
-**P6 corelib (M8) е завършен** (examples/corelib.mj + examples/bitop.mj; **33/33**) →
-следва избор между:
-1. **P3.5 GC решение** — паметта е arena/без free-ване от P0; GC (mark-sweep по vtables/header
-   seam от P3) е големият риск за P6+ (core lib обекти/контейнери, P7 threads).
-   Решение: (A) ръчен conservative mark&sweep по stack scan или (B) MMTk binding.
-   Seam-ът (header class index + pad, `mm_alloc`) е готов от P3. **Също така реши 16KB
+**Шорт-терм (в процес): Step A repo hygiene, след това commit+push.**
+- [x] нов `setup.sh` (bash-chain; mvn build + tests)
+- [x] README.md обновен (Инсталация/Употреба/Тестове/Структура + --link/--corelib)
+- [x] CONTEXT.md — актуален (34/34, T1-T3, T4 deferred)
+- [ ] `git rm -r .idea tools/tools.iml minij-compiler.iml`; `.gitignore` += `.idea/`, `*.iml`
+- [ ] verify: `bash setup.sh` (mvn package + 34/34) в /shared/compiler
+- [ ] commit+push (krasgit)
+Опционално B: dynamic-кейсове в run_tests.sh (`--link=dynamic`); C: JUnit (няма src/test);
+D: T4 = dynamic `libminijcore.so` — чака PIC-емисия в Emitter-а.
+
+**Среден-терм (компилаторна посока):** след като wrap-up е pushed —
+P3.5 GC решение — паметта е arena/без free-ване от P0; GC (mark-sweep по vtables/header
+seam от P3) е големият риск за P6+ (core lib обекти/контейнери, P7 threads).
+Решение: (A) ръчен conservative mark&sweep по stack scan или (B) MMTk binding.
+Seam-ът (header class index + pad, `mm_alloc`) е готов от P3. **Също така реши 16KB
    bump-arena OOM (M3.5-T1)** — дългите низови run-ове пак рискуват (3.5 бъг, жив).
 2. **M8 остатък (не-блокер)**: Math `exp/log/sin/cos/tan` natives; `parseInt/parseLong`
    пълни `NumberFormatException`-и; MiniF оставен настрана.
@@ -474,8 +512,9 @@ P0..P10 (P6 core lib = DONE; P3.5 GC е следващият голям риск
   geom/Geom.mj + shapes/{Shape,Circle,Square}.mj), **corelib.mj**, **bitop.mj**.
 - `corelib/java/util/Random.mj` — чист MiniJ LCG (маска-литерал `281474976710655L`,
   rejection sampling), JDK bit-идентичен.
-- `scripts/run_tests.sh` — regression harness (33 теста; `check corelib 0 "<JDK-точни>"` +
-  `check bitop 0 "<oracle>"`; бивши `/tmp/opencode/run_tests.sh`
+- `scripts/run_tests.sh` — regression harness (34 теста, 34/34; `check corelib 0 "<JDK-точни>"` +
+  `check bitop 0 "<oracle>"`, `check librun 0 "<също>" "--corelib=lib"` — единственият с xtra args;
+  бивши `/tmp/opencode/run_tests.sh`
   беше с corrupt-edit — `run_out` без `}`/без `got=$?`, орязани expected-out за dbl/arrays/md;
   вече е в repo, self-contained, `TARGET` env (arm64), `--only=<name>`).
 - `/tmp/opencode/*Probe.java` (SV/EV/CH/MDP/NAD/SE/**OProbe**/OProbe2/OProbe3/**StProbe**/

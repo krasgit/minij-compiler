@@ -6,6 +6,13 @@ t_*
 /gcd.alloc.mir
 /-.alloc.mir
 
+# IDE state (Maven import ги регенерира)
+.idea/
+*.iml
+
+# Maven output (всички модули)
+target/
+
 # repo-root build/test артефакти (от mc/test.sh директно в root) — не за commit
 /*.alloc.mir
 /*.ast

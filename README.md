@@ -21,13 +21,30 @@
 
 ## Инсталация
 
-    pkg install openjdk-17 binutils wget
-    ./build.sh
+    pkg install openjdk-17 maven binutils wget
+    bash setup.sh          # сборка + регресия (всичко през bash, без x-битове)
+
+Сборката е **Maven multi-module reactor**: `common`, `tools/*`, `driver`, `dist`
+(shaded fat jar), `runtime`, `corelib` — `bash build.sh` (= `mvn -DskipTests package`).
 
 ## Употреба
 
-    ./mc examples/hello.mj -o hello
+    bash mc examples/hello.mj -o hello
     ./hello; echo $?
+
+`mc` е wrapper към `DistDriverMain` (трите `jar`-а на classpath). Хостът може да е с
+друга архитектура от таргета — `--target=arm64|x86-64`.
+
+### Линк и пре-събрани библиотеки
+
+- `--link=static` (default) — свързва `runtime/target/libruntime.a`.
+- `--link=dynamic` — свързва `runtime/target/libruntime.so` (NEEDED + rpath); изисква
+  поне един линк срещу prebuilt runtime — иначе се компилират `runtime.c`/`natives.c` на място.
+- `--corelib=lib` — примерът не включва corelib сорс; класовите индекси се фиксират по
+  `corelib/target/classmap.txt` (`idx Class`) и символите се резолват външно от
+  `corelib/target/libminijcore.a` (object-header vtable dispatch за `Math/Integer/Long/
+  System/Random/Arrays` е стабилен между отделни компилации). По подразбиране е inline
+  (corelib сорс се компилира заедно с app-а).
 
 ## Pipeline
 
@@ -50,11 +67,11 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 ## Инспекция
 
-    ./mc --stage=ast examples/gcd.mj
-    ./mc --stage=lir examples/gcd.mj
-    ./mc --stage=ssa examples/gcd.mj
-    ./mc --stage=asm examples/gcd.mj
-    ./mc --keep examples/gcd.mj
+    bash mc --stage=ast examples/gcd.mj
+    bash mc --stage=lir examples/gcd.mj
+    bash mc --stage=ssa examples/gcd.mj
+    bash mc --stage=asm examples/gcd.mj
+    bash mc --keep examples/gcd.mj
 
 ## Ръчен pipeline
 
@@ -85,15 +102,16 @@ Backend-ът е изцяло `.rule` шаблони — [docs/rule-format.md](do
 
 ## Cross-compilation
 
-    ./mc --target=arm64 examples/hello.mj -o hello.arm
+    bash mc --target=arm64 examples/hello.mj -o hello.arm
 
 ## Тестове
 
-    ./test.sh
+    bash test.sh                # делегира към scripts/run_tests.sh
+    TARGET=arm64 bash scripts/run_tests.sh --only=md
 
-Регресията се гони от **`scripts/run_tests.sh`** (ползва `./mc`; arm64 — нативен хост или
-qemu-aarch64 с `-L /usr/aarch64-linux-gnu`): **31/31 теста на arm64**
-(47, 12, 55, 55, 55, 5, 92, print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
+Регресията се гони от **`scripts/run_tests.sh`** (ползва `bash mc`; arm64 — нативен хост или
+qemu-aarch64 с `-L /usr/aarch64-linux-gnu`): **34/34 теста на arm64** (47, 12, 55, 55, 55, 5, 92,
+print `123/-7/A`, dbl `1/2/2`, lng `68/3/1`, mix `6/4`,
 native `14/7/5` с `-lc`, arrays `30/5/6/1000000009/4`, oob exit 134, str `hello/world/A->101/5/hXllo/abcde`,
 str2 с `\t`/`\n` escapes и char[] return/params, md `3/4/138/12/7/3/13/5` (multi-D),
 str3 `1/0/0/7`, `abcdef`, `6/6`, `xabc`, `abcABcd`, `1` (String equals/concat),
@@ -111,6 +129,9 @@ cflow `30/2/23/23/22/40/24/33/8/103/3`, exit 0 (P4 control flow — short-circui
 labeled loops, enhanced-for, assignment-as-expression);
 exc `10/110/111/7/114/118/518/50`, exit 3 (P5 exceptions),
 imports `12/9/4/10/40/12`, exit 0 (P2.5 packages + import); всеки — exit code + stdout чек).
+corelib `5/7/3/4/9/1024/…`, exit 0 (P6 corelib — Math/Integer/Long/Random/Arrays/System, JDK
+bit-identical Random), bitop `16/-2147483648/…`, exit 0 (P6 shift/bitwise), librun (същият
+corelib output през `--corelib=lib` — предварително компилирана `libminijcore.a` + classmap).
 
 ### String / char (P2)
 
@@ -386,14 +407,20 @@ Core lib договор (API-огледало на java.base): [docs/corelib.md]
 
 ## Структура
 
+Maven reactor (`pom.xml`):
+
     compiler/
-    ├── build.sh, mc, test.sh
-    ├── README.md, docs/grammar.md, docs/ROADMAP.md, docs/corelib.md, docs/rule-format.md
-    ├── lib/janino.jar
-    ├── bin/               — wrapper скриптове (emit-arm/emit-x86 → shared emit)
-    ├── common/            — shared: Ir, Ssa, Opt, Regalloc, Emitter
-    ├── tools/             — main-ове на tools + shared emit main
-    ├── rules/             — x86.rule, arm.rule (.rule v2: regs+subs+fregs/fargs/fret)
-    ├── runtime/           — crt0.S + runtime.c (putc/puti/puts/exit, mm_alloc seam)
-    ├── corelib/           — draft core library (java.lang/java.util .mj + README)
-    └── examples/          — hello, gcd, fib, forloop, dowhile, ternary, switch, print (.mj)
+    ├── pom.xml                 — reactor (common, tools, driver, dist, runtime, corelib)
+    ├── build.sh, setup.sh, mc, test.sh
+    ├── README.md, docs/…
+    ├── common/                 — src/main/java/bg/minij/common (Ir, Ssa, Opt, Regalloc, Emitter)
+    ├── tools/                  — src/main/java/bg/minij/tools/<tool> (8-те pipeline анжа)
+    ├── driver/                 — DriverMain (mc wrapper) — pipeline + линк + corelib mode
+    ├── dist/                   — shaded fat jar (dist/target/minij-compiler.jar)
+    ├── runtime/                — crt0.S + runtime.c/natives.c + build-libs.sh (libruntime.a/.so)
+    ├── corelib/                — prebuilt corelib: build-libs.sh → libminijcore.a + classmap.txt
+    ├── rules/                  — x86.rule, arm.rule (.rule v2: regs+subs+fregs/fargs/fret)
+    └── examples/               — hello, gcd, fib, …, corelib, bitop
+
+`bin/` — standalone wrapper-и на индивиdualните tools (за ръчен pipeline и tool-единични
+тестове). Prebuilt библиотеките лежат в `*/target/` (не се commit-ват).
